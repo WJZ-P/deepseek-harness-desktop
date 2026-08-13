@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Minimal core capability for the local launcher window",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

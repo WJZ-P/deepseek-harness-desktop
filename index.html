@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeepSeek Harness</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+  <body>
+    <main class="launch-shell">
+      <section class="launch-card" aria-live="polite">
+        <div class="mark" aria-hidden="true">DS</div>
+        <p class="eyebrow">DEEPSEEK HARNESS</p>
+        <h1 id="launch-title">正在启动本地 Harness</h1>
+        <p id="launch-detail">正在创建回环服务并装载 Cordis 插件树…</p>
+        <div class="progress"><span></span></div>
+        <pre id="launch-error" hidden></pre>
+        <div class="actions" hidden id="launch-actions">
+          <button type="button" id="retry">重试</button>
+          <button type="button" class="secondary" id="copy-error">复制错误</button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
