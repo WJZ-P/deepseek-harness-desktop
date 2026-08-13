@@ -1,0 +1,417 @@
+import { spawn } from "node:child_process";
+import {
+  access,
+  copyFile,
+  cp,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { constants as fsConstants, statSync } from "node:fs";
+import { createRequire } from "node:module";
+import { basename, dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const desktopRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const harnessRoot = join(desktopRoot, "harness");
+const releaseRuntime = join(desktopRoot, "release-runtime");
+const stagingRoot = join(releaseRuntime, "harness");
+const archivePath = join(releaseRuntime, "harness.tar.gz");
+const nodePath = join(releaseRuntime, "node.exe");
+const outputRoot = join(desktopRoot, "dist");
+const tauriBundleRoot = join(
+  desktopRoot,
+  "src-tauri",
+  "target",
+  "release",
+  "bundle",
+  "nsis",
+);
+const packageJson = JSON.parse(
+  await readFile(join(desktopRoot, "package.json"), "utf8"),
+);
+const artifactName = `DeepSeek-Harness-Desktop-${packageJson.version}-windows-x64-setup.exe`;
+
+function pnpmInvocation(args) {
+  if (process.env.npm_execpath?.toLowerCase().includes("pnpm")) {
+    return { command: process.execPath, args: [process.env.npm_execpath, ...args] };
+  }
+  if (process.platform === "win32") {
+    return {
+      command: process.env.ComSpec ?? "cmd.exe",
+      args: ["/d", "/s", "/c", "pnpm.cmd", ...args],
+    };
+  }
+  return { command: "pnpm", args };
+}
+
+async function run(command, args, options = {}) {
+  console.log(`[release] ${basename(command)} ${args.join(" ")}`);
+  await new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd ?? desktopRoot,
+      env: options.env ?? process.env,
+      stdio: options.stdio ?? "inherit",
+      shell: false,
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolvePromise();
+      } else {
+        reject(
+          new Error(
+            signal
+              ? `${basename(command)} was terminated by ${signal}`
+              : `${basename(command)} exited with code ${code}`,
+          ),
+        );
+      }
+    });
+  });
+}
+
+async function pathExists(path) {
+  try {
+    await access(path, fsConstants.F_OK);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function prepareHarness() {
+  const invocation = pnpmInvocation(["run", "harness:prepare"]);
+  await run(invocation.command, invocation.args);
+}
+
+async function deployCli() {
+  await rm(releaseRuntime, { recursive: true, force: true });
+  await mkdir(releaseRuntime, { recursive: true });
+  const invocation = pnpmInvocation([
+    "--dir",
+    harnessRoot,
+    "--filter",
+    "@deepseek-ai/dsh",
+    "deploy",
+    "--prod",
+    "--config.node-linker=hoisted",
+    "--config.inject-workspace-packages=true",
+    "--config.auto-install-peers=true",
+    stagingRoot,
+  ]);
+  await run(invocation.command, invocation.args);
+}
+
+function resolvePackageManifest(anchor, packageName) {
+  let directory = dirname(anchor);
+  const segments = packageName.split("/");
+  while (true) {
+    const candidate = join(directory, "node_modules", ...segments, "package.json");
+    if (pathExistsSync(candidate)) return candidate;
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  const requireFrom = createRequire(anchor);
+  try {
+    return requireFrom.resolve(`${packageName}/package.json`);
+  } catch {
+    try {
+      const entry = requireFrom.resolve(packageName);
+      let directory = dirname(entry);
+      while (dirname(directory) !== directory) {
+        const manifest = join(directory, "package.json");
+        try {
+          if (requireFrom.resolve(manifest) === manifest) return manifest;
+        } catch {
+          // Keep walking toward the package root.
+        }
+        directory = dirname(directory);
+      }
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function pathExistsSync(path) {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function copyPackage(sourceManifest, packageName) {
+  const source = dirname(sourceManifest);
+  const destination = join(stagingRoot, "node_modules", ...packageName.split("/"));
+  if (await pathExists(destination)) return;
+  await mkdir(dirname(destination), { recursive: true });
+  const sourceModules = join(source, "node_modules");
+  await cp(source, destination, {
+    recursive: true,
+    dereference: true,
+    filter: (path) => path !== sourceModules && !path.startsWith(sourceModules + sep),
+  });
+}
+
+async function materializeHarnessClosure() {
+  const sourceAppManifest = join(harnessRoot, "apps", "cli", "package.json");
+  const workspacePackages = await indexWorkspacePackages();
+  const sourceQueue = [sourceAppManifest];
+  const seen = new Set();
+
+  while (sourceQueue.length > 0) {
+    const manifestPath = sourceQueue.shift();
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const dependencies = [
+      ...Object.keys(manifest.dependencies ?? {}),
+      ...Object.keys(manifest.peerDependencies ?? {}),
+    ];
+    for (const packageName of dependencies) {
+      const workspaceManifest = workspacePackages.get(packageName);
+      if (workspaceManifest === undefined) continue;
+      if (seen.has(packageName)) continue;
+      seen.add(packageName);
+      sourceQueue.push(workspaceManifest);
+      await copyPackage(workspaceManifest, packageName);
+    }
+  }
+
+  const unresolved = [];
+  const runtimeQueue = [join(stagingRoot, "package.json")];
+  const runtimeSeen = new Set();
+  while (runtimeQueue.length > 0) {
+    const manifestPath = runtimeQueue.shift();
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const dependencies = [
+      ...Object.keys(manifest.dependencies ?? {}),
+      ...Object.keys(manifest.peerDependencies ?? {}),
+    ];
+    for (const packageName of dependencies) {
+      if (runtimeSeen.has(packageName)) continue;
+      runtimeSeen.add(packageName);
+      const dependencyManifest = resolvePackageManifest(manifestPath, packageName);
+      if (dependencyManifest === undefined) {
+        if (manifest.peerDependenciesMeta?.[packageName]?.optional !== true) {
+          unresolved.push(`${manifest.name} -> ${packageName}`);
+        }
+      } else {
+        runtimeQueue.push(dependencyManifest);
+      }
+    }
+  }
+  if (unresolved.length > 0) {
+    throw new Error(`Harness runtime closure is incomplete:\n${unresolved.join("\n")}`);
+  }
+  await Promise.all([
+    rm(join(stagingRoot, "node_modules", ".bin"), { recursive: true, force: true }),
+    rm(join(stagingRoot, "node_modules", ".pnpm"), { recursive: true, force: true }),
+    rm(join(stagingRoot, "node_modules", ".modules.yaml"), { force: true }),
+    rm(join(stagingRoot, "pnpm-lock.yaml"), { force: true }),
+  ]);
+  await assertNoSymlinks(stagingRoot);
+  console.log(`[release] Verified ${runtimeSeen.size} runtime packages.`);
+}
+
+async function indexWorkspacePackages() {
+  const packages = new Map();
+  const ignored = new Set([".git", "dist", "lib", "node_modules", "target"]);
+  const visit = async (directory) => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (!entry.isDirectory() || ignored.has(entry.name)) continue;
+      const path = join(directory, entry.name);
+      const manifest = join(path, "package.json");
+      if (await pathExists(manifest)) {
+        const parsed = JSON.parse(await readFile(manifest, "utf8"));
+        if (typeof parsed.name === "string") packages.set(parsed.name, manifest);
+      }
+      await visit(path);
+    }
+  };
+  for (const directory of ["apps", "native", "packages", "vendor"]) {
+    await visit(join(harnessRoot, directory));
+  }
+  return packages;
+}
+
+async function assertNoSymlinks(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    const metadata = await lstat(path);
+    if (metadata.isSymbolicLink()) {
+      throw new Error(`Harness runtime contains a non-portable symlink: ${path}`);
+    }
+    if (metadata.isDirectory()) await assertNoSymlinks(path);
+  }
+}
+
+async function copyNodeRuntime() {
+  if (process.platform !== "win32" || process.arch !== "x64") {
+    throw new Error("The Release EXE build currently targets Windows x64.");
+  }
+  const version = process.versions.node.split(".").map(Number);
+  const supported =
+    (version[0] === 22 && version[1] >= 19) || version[0] >= 24;
+  if (!supported) {
+    throw new Error(`Node ${process.versions.node} is outside Harness's supported range.`);
+  }
+  await copyFile(process.execPath, nodePath);
+  console.log(`[release] Embedded Node ${process.versions.node}.`);
+}
+
+async function smokeRuntime() {
+  const result = await new Promise((resolvePromise, reject) => {
+    const child = spawn(
+      nodePath,
+      [join(stagingRoot, "lib", "bin.js"), "web", "--host", "127.0.0.1", "--port", "0"],
+      {
+        cwd: stagingRoot,
+        env: {
+          ...process.env,
+          DSH_HOME: join(releaseRuntime, "smoke-home"),
+          DSH_TELEMETRY_DISABLED: "1",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timeout;
+    const finish = async (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (child.exitCode === null) {
+        const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+          stdio: "ignore",
+        });
+        await new Promise((done) => {
+          const killTimeout = setTimeout(() => {
+            killer.kill();
+            child.kill();
+            done();
+          }, 5_000);
+          const finishKill = () => {
+            clearTimeout(killTimeout);
+            done();
+          };
+          killer.once("exit", finishKill);
+          killer.once("error", finishKill);
+        });
+      }
+      child.stdout.destroy();
+      child.stderr.destroy();
+      if (error) reject(error);
+      else resolvePromise(value);
+    };
+    const inspect = async () => {
+      const ready = /^dsh web: (http:\/\/127\.0\.0\.1:\d+)/m.exec(stdout);
+      if (!ready) return;
+      try {
+        const response = await fetch(ready[1]);
+        const body = await response.text();
+        if (response.status !== 200 || !/<html/i.test(body)) {
+          throw new Error(`Harness smoke returned HTTP ${response.status}.`);
+        }
+        await finish(undefined, { url: ready[1], bytes: body.length });
+      } catch (error) {
+        await finish(error);
+      }
+    };
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      void inspect();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.once("error", (error) => void finish(error));
+    child.once("exit", (code) => {
+      if (!settled) {
+        void finish(
+          new Error(
+            `Harness smoke exited with code ${code}.\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+          ),
+        );
+      }
+    });
+    timeout = setTimeout(() => {
+      void finish(
+        new Error(`Harness smoke timed out.\nstdout:\n${stdout}\nstderr:\n${stderr}`),
+      );
+    }, 45_000);
+  });
+  await rm(join(releaseRuntime, "smoke-home"), { recursive: true, force: true });
+  console.log(`[release] Harness smoke passed at ${result.url} (${result.bytes} bytes).`);
+}
+
+async function archiveHarness() {
+  await run(
+    "tar.exe",
+    ["-czf", archivePath, "-C", releaseRuntime, "harness"],
+    { cwd: desktopRoot },
+  );
+  await rm(stagingRoot, { recursive: true, force: true });
+  const archive = await stat(archivePath);
+  console.log(`[release] Packed Harness runtime (${(archive.size / 1024 / 1024).toFixed(1)} MiB).`);
+}
+
+async function buildTauri() {
+  await rm(tauriBundleRoot, { recursive: true, force: true });
+  const invocation = pnpmInvocation(["tauri", "build", "--bundles", "nsis"]);
+  await run(invocation.command, invocation.args);
+}
+
+async function publishArtifact() {
+  const candidates = (await readdir(tauriBundleRoot))
+    .filter((name) => name.toLowerCase().endsWith(".exe"))
+    .map((name) => join(tauriBundleRoot, name));
+  if (candidates.length !== 1) {
+    throw new Error(
+      `Expected one NSIS setup EXE in ${tauriBundleRoot}, found ${candidates.length}.`,
+    );
+  }
+  await mkdir(outputRoot, { recursive: true });
+  const artifactPath = join(outputRoot, artifactName);
+  await copyFile(candidates[0], artifactPath);
+  const artifact = await stat(artifactPath);
+  await writeFile(
+    `${artifactPath}.sha256`,
+    await hashFile(artifactPath).then((hash) => `${hash}  ${artifactName}\n`),
+  );
+  console.log(
+    `[release] EXE ready: ${artifactPath} (${(artifact.size / 1024 / 1024).toFixed(1)} MiB)`,
+  );
+}
+
+async function hashFile(path) {
+  const { createHash } = await import("node:crypto");
+  const { createReadStream } = await import("node:fs");
+  return new Promise((resolvePromise, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(path);
+    stream.on("error", reject);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolvePromise(hash.digest("hex")));
+  });
+}
+
+await prepareHarness();
+await deployCli();
+await materializeHarnessClosure();
+await copyNodeRuntime();
+await smokeRuntime();
+await archiveHarness();
+await buildTauri();
+await publishArtifact();

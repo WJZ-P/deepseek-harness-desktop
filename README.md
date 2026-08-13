@@ -1,5 +1,8 @@
 # DeepSeek Harness Desktop
 
+> [!WARNING]
+> **仍在开发完善中，目前暂不可用，预计两天内发布 Release。**
+
 DeepSeek Harness 的 Tauri v2 桌面封装。desktop 仓库直接包含完整的 Harness 源码，桌面层复用现有 Web Client、Typert RPC 与 Cordis profile，不复制 agent loop，也不维护另一套会话实现。
 
 ## 目录结构
@@ -67,6 +70,38 @@ Vite 开发地址固定为 `http://localhost:821`，HMR 使用端口 `822`。Har
 
 Node.js 不在 GUI 进程可见的 `PATH` 中时，可用 `DSH_DESKTOP_NODE` 指定绝对路径。
 
+## 构建 Release EXE
+
+仓库根目录的 `npm run build` 现在是完整的 Windows x64 发布构建，不再只是 Vite 前端构建：
+
+```powershell
+pnpm install
+npm run build
+```
+
+构建流程会准备 Harness、生成并校验生产依赖闭包、内置当前受支持的 Windows Node.js、执行随机端口 HTTP 200 冒烟，然后构建 NSIS 安装器。最终可上传 GitHub Release 的文件固定写到：
+
+```text
+dist/DeepSeek-Harness-Desktop-0.1.0-windows-x64-setup.exe
+dist/DeepSeek-Harness-Desktop-0.1.0-windows-x64-setup.exe.sha256
+```
+
+安装器包含 Node 运行时和 Harness Web 生产运行时。安装后的应用不读取当前源码 checkout，也不要求使用者另外安装 Node.js。首次启动会把压缩运行时展开到应用本地数据目录，后续启动复用同一版本的缓存。
+
+构建后可运行安装级冒烟测试。它会核验 SHA-256、静默安装到临时目录、从安装目录启动桌面程序、确认内置 Node 启动 Harness 并取得随机回环地址的 HTTP 200，最后执行静默卸载：
+
+```powershell
+pnpm run test:release
+```
+
+只构建桌面启动页时可运行 `pnpm run build:frontend`；该命令只产生 Vite 资源，不产生 EXE。
+
+## GitHub Actions 自动发布
+
+[`release.yml`](.github/workflows/release.yml) 在推送 `v*` tag 时使用 GitHub 托管的 Windows runner 执行同一套自包含构建。流水线会先校验 tag、`package.json`、Tauri 配置和 Cargo 包版本一致，再运行安装级冒烟测试、上传安装器与 SHA-256 文件为 Actions artifact，并创建公开的 GitHub Release。
+
+正式版本确认可用后再创建与应用版本一致的 `v*` tag。Release 构建不需要额外密钥；发布权限来自仓库自动提供的 `GITHUB_TOKEN`。
+
 ## 更新 Harness
 
 `harness/` 是从一个明确上游提交导入的源码快照。更新时应整体导入一个经过确认的上游提交，并在同一改动中更新 [`HARNESS_UPSTREAM.md`](HARNESS_UPSTREAM.md) 的提交号。不要把 `harness/` 改回子模块，也不要提交 `node_modules/`、`lib/` 或 `dist/` 生成物。
@@ -75,10 +110,11 @@ Node.js 不在 GUI 进程可见的 `PATH` 中时，可用 `DSH_DESKTOP_NODE` 指
 
 ```powershell
 pnpm run harness:prepare
-pnpm run build
+pnpm run build:frontend
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo check --manifest-path src-tauri/Cargo.toml
-pnpm tauri build --no-bundle
+npm run build
+pnpm run test:release
 ```
 
 ## GitHub 源码完整性检查
@@ -93,7 +129,7 @@ pnpm run harness:verify-source
 
 ## 分发边界
 
-当前源码仓库可以从普通 clone 完整构建并运行。生成的 desktop 可执行文件目前仍依赖 Node.js 和同一次 checkout 中构建出的 Harness JS 产物。制作完全自包含安装包时，需要把 Harness Node 运行时与 JS 产物打成 Tauri sidecar，再配置 `bundle.externalBin`。
+发布目标当前是 Windows x64 NSIS 安装器。源码仓库仍保留完整 `harness/` 供审计与本地开发；安装器则携带从这些源码构建并通过冒烟验证的生产运行时。未签名安装器可能触发 Windows SmartScreen 提示；发布前可在 Tauri/NSIS 流程中增加代码签名。
 
 ## 图标
 

@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm run dev:desktop",
     "devUrl": "http://localhost:821",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm run build:frontend",
     "frontendDist": "../dist"
   },
   "app": {
@@ -29,7 +29,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi"],
+    "targets": ["nsis"],
+    "resources": {
+      "../release-runtime/node.exe": "runtime/node.exe",
+      "../release-runtime/harness.tar.gz": "runtime/harness.tar.gz"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

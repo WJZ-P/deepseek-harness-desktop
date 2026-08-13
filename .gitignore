@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-ssr/
+release-runtime/
 src-tauri/target/
 .tmp-*/
 *.local

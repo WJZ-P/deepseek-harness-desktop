@@ -25,6 +25,8 @@ The desktop repository adds only:
 
 Agent behavior, tools, RPC methods, persistence, workspace access, and client composition remain implemented by Harness plugins rather than a parallel desktop implementation.
 
-## Follow-up packaging seam
+## Release packaging
 
-The development launcher uses the installed Node executable plus the built vendored checkout. A self-contained release should preserve the same process protocol (`stdout` readiness, loopback HTTP/WebSocket, process-tree teardown) while replacing the command resolver with a Tauri `externalBin` sidecar. This keeps packaging separate from runtime architecture.
+Development uses the installed Node executable plus the built vendored checkout. The Windows Release build deploys the CLI production closure, materializes workspace peer packages, embeds a supported `node.exe`, and stores the Harness tree as a compressed Tauri resource. First launch extracts the versioned tree under the application's local data directory; subsequent launches reuse it.
+
+Both modes preserve the same process protocol: `stdout` readiness, a random loopback HTTP/WebSocket origin, and process-tree teardown. The packaged resolver is therefore a distribution change rather than a second runtime architecture.

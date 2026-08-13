@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-x64:
+    name: Build and publish Windows x64 installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.16.0
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            harness/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify release version
+        shell: pwsh
+        run: |
+          $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargoVersion = [regex]::Match(
+            (Get-Content src-tauri/Cargo.toml -Raw),
+            '(?m)^version = "([^"]+)"$'
+          ).Groups[1].Value
+          $versions = @($packageVersion, $tauriVersion, $cargoVersion)
+          if ($versions.Where({ $_ -ne $tagVersion }).Count -gt 0) {
+            throw "Tag $env:GITHUB_REF_NAME does not match package versions: $($versions -join ', ')"
+          }
+
+      - name: Install desktop dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build self-contained NSIS installer
+        run: npm run build
+
+      - name: Smoke-test installed application
+        run: pnpm run test:release
+
+      - name: Verify release artifacts
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $exe = "dist/DeepSeek-Harness-Desktop-$version-windows-x64-setup.exe"
+          if (!(Test-Path -LiteralPath $exe)) { throw "Missing $exe" }
+          if (!(Test-Path -LiteralPath "$exe.sha256")) { throw "Missing $exe.sha256" }
+          Get-Item -LiteralPath $exe, "$exe.sha256" | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: DeepSeek-Harness-Desktop-${{ github.ref_name }}-windows-x64
+          path: |
+            dist/*.exe
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $exe = "dist/DeepSeek-Harness-Desktop-$version-windows-x64-setup.exe"
+          if (gh release view $env:GITHUB_REF_NAME 2>$null) {
+            gh release upload $env:GITHUB_REF_NAME $exe "$exe.sha256" --clobber
+          } else {
+            gh release create $env:GITHUB_REF_NAME `
+              $exe `
+              "$exe.sha256" `
+              --verify-tag `
+              --generate-notes `
+              --title "DeepSeek Harness Desktop $env:GITHUB_REF_NAME"
+          }
