@@ -24,6 +24,12 @@ packages:
 # builds must resolve those matching names to this workspace's pinned sources.
 linkWorkspacePackages: true
 
+# pnpm's shared-lockfile deploy currently rewrites workspace file dependencies
+# to absolute file:// URLs, which no longer match the reviewed allowBuilds keys
+# below. Keep the established deploy implementation until that path preserves
+# the workspace dependency identity across Windows, Linux, and macOS.
+forceLegacyDeploy: true
+
 overrides:
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
   '@deepseek-ai/schemastery': 'link:vendor/schemastery'
