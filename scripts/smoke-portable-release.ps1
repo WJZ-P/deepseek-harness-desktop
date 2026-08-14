@@ -131,6 +131,9 @@ try {
     if ($null -eq $response -or $null -eq $nodeProcess -or $null -eq $listener) {
         throw "Portable desktop application did not expose the Harness page within 90 seconds"
     }
+    if ($response.Content -notmatch "data-dsh-desktop-theme-bridge") {
+        throw "Packaged Harness HTML is missing the desktop theme bridge"
+    }
     if (
         ![string]::Equals(
             [IO.Path]::GetFullPath($nodePath),
@@ -193,12 +196,14 @@ try {
         "harness_url=$harnessUrl"
         "http_status=$([int]$response.StatusCode)"
         "html_bytes=$($response.RawContentLength)"
+        "theme_bridge=present"
         "webview_process=$($webviewProcess.ProcessId)"
         "webview_connection=established"
     ) | Set-Content -LiteralPath $evidencePath -Encoding utf8
 
     Write-Host "[portable-smoke] Window: $($app.MainWindowTitle)"
     Write-Host "[portable-smoke] Harness: $harnessUrl (HTTP $($response.StatusCode))"
+    Write-Host "[portable-smoke] Desktop theme bridge present"
     Write-Host "[portable-smoke] WebView iframe connection established"
 
     $nodePid = $nodeProcess.ProcessId

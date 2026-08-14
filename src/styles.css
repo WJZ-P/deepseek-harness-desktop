@@ -3,7 +3,7 @@
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --titlebar-height: 42px;
+  --titlebar-height: 32px;
   --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
   --dsw-static-neutral-bluish-50: rgb(249, 250, 251);
   --dsw-static-neutral-bluish-1000: rgb(15, 17, 21);
@@ -88,8 +88,8 @@ button {
   height: 100%;
   flex: 1;
   align-items: center;
-  gap: 9px;
-  padding: 0 14px;
+  gap: 7px;
+  padding: 0 12px;
   overflow: hidden;
   font-size: 12px;
   font-weight: 560;
@@ -98,8 +98,8 @@ button {
 }
 
 .titlebar-mark {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   flex: none;
   background: currentColor;
   mask: url("./assets/whale-icon-light.svg") center / contain no-repeat;
@@ -166,7 +166,7 @@ body.is-maximized .window-control .restore-glyph {
 }
 
 .window-close {
-  width: 48px;
+  width: 46px;
 }
 
 .window-close:hover,

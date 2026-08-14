@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { lstat, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { installDesktopThemeBridge } from "./desktop-theme-bridge.mjs";
 
 const desktopRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const harnessRoot = join(desktopRoot, "harness");
@@ -112,3 +113,5 @@ if (needsBuild) {
 } else {
   console.log("[harness] Vendored Harness is ready.");
 }
+
+await installDesktopThemeBridge(buildArtifacts[1]);

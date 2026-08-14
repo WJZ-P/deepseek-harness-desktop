@@ -665,6 +665,7 @@ dependencies = [
 name = "deepseek-harness-desktop"
 version = "0.1.0"
 dependencies = [
+ "dunce",
  "flate2",
  "serde",
  "serde_json",

@@ -35,7 +35,7 @@ flowchart LR
 - Rust 层默认从仓库内 `harness/` 启动 `apps/cli/lib/bin.js web --host 127.0.0.1 --port 0`，读取 `dsh web:` 就绪行后才把随机回环地址交给桌面外壳加载。
 - WebView 使用 Harness 分配的随机回环端口，因此复用现有 Host fence、`/api` 传输和两条 WebSocket 下行流。
 - 关闭窗口或应用时，桌面层回收整个 Node 子进程树。
-- Desktop 外壳拥有跟随 Tauri 窗口主题的启动页和自绘标题栏；标题栏在 Harness 主界面载入后继续保留，主界面内容仍由 `harness/apps/web/dist` 提供。
+- Desktop 外壳使用 32px 原生量级的自绘标题栏；启动阶段跟随 Tauri 窗口主题，Harness 主界面载入后则通过受控主题桥接实时跟随应用内 Appearance 设置。标题栏会持续保留，主界面内容仍由 `harness/apps/web/dist` 提供。
 - `DEEPSEEK_HARNESS_ROOT` 可显式覆盖仓库内源码路径，供临时调试其他 Harness checkout 使用。
 
 ## 克隆并运行

@@ -11,6 +11,14 @@ interface LaunchStatus {
   url: string | null;
 }
 
+interface HarnessThemeMessage {
+  type: "deepseek-harness:theme";
+  colorScheme: "light" | "dark";
+}
+
+const HARNESS_THEME_MESSAGE = "deepseek-harness:theme";
+const HARNESS_THEME_REQUEST = "deepseek-harness:theme-request";
+
 const title = document.querySelector<HTMLElement>("#launch-title");
 const detail = document.querySelector<HTMLElement>("#launch-detail");
 const error = document.querySelector<HTMLElement>("#launch-error");
@@ -27,6 +35,8 @@ const close = document.querySelector<HTMLButtonElement>("#window-close");
 const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
 
 let mountedHarnessUrl: string | null = null;
+let mountedHarnessOrigin: string | null = null;
+let harnessTheme: Theme | null = null;
 
 function resolveWindow(): TauriWindow | null {
   try {
@@ -38,17 +48,26 @@ function resolveWindow(): TauriWindow | null {
 
 const appWindow = resolveWindow();
 
-function applyTheme(theme: Theme | null): void {
+function renderTheme(theme: Theme | null): void {
   const dark = theme === "dark" || (theme === null && systemTheme.matches);
   document.documentElement.style.colorScheme = dark ? "dark" : "light";
   document.body.toggleAttribute("data-ds-dark-theme", dark);
   document.body.setAttribute("data-ds-theme-ready", "");
 }
 
+function applyWindowTheme(theme: Theme | null): void {
+  if (harnessTheme === null) renderTheme(theme);
+}
+
+function applyHarnessTheme(theme: Theme): void {
+  harnessTheme = theme;
+  renderTheme(theme);
+}
+
 function bindSystemTheme(): void {
-  applyTheme(systemTheme.matches ? "dark" : "light");
+  applyWindowTheme(systemTheme.matches ? "dark" : "light");
   systemTheme.addEventListener("change", ({ matches }) => {
-    applyTheme(matches ? "dark" : "light");
+    applyWindowTheme(matches ? "dark" : "light");
   });
 }
 
@@ -59,12 +78,30 @@ async function bindWindowTheme(): Promise<void> {
   }
 
   try {
-    applyTheme(await appWindow.theme());
-    await appWindow.onThemeChanged(({ payload }) => applyTheme(payload));
+    applyWindowTheme(await appWindow.theme());
+    await appWindow.onThemeChanged(({ payload }) => applyWindowTheme(payload));
   } catch {
     bindSystemTheme();
   }
 }
+
+function isHarnessThemeMessage(value: unknown): value is HarnessThemeMessage {
+  if (typeof value !== "object" || value === null) return false;
+  const message = value as Partial<HarnessThemeMessage>;
+  return message.type === HARNESS_THEME_MESSAGE
+    && (message.colorScheme === "light" || message.colorScheme === "dark");
+}
+
+window.addEventListener("message", (event) => {
+  if (
+    mountedHarnessOrigin === null
+    || event.origin !== mountedHarnessOrigin
+    || event.source !== harnessFrame?.contentWindow
+    || !isHarnessThemeMessage(event.data)
+  ) return;
+
+  applyHarnessTheme(event.data.colorScheme);
+});
 
 async function syncMaximizedState(): Promise<void> {
   if (!appWindow) return;
@@ -101,6 +138,7 @@ function mountHarness(rawUrl: string): void {
   }
 
   mountedHarnessUrl = rawUrl;
+  mountedHarnessOrigin = url.origin;
   harnessSurface.hidden = false;
   harnessFrame.dataset.loading = "true";
   harnessFrame.src = url.href;
@@ -112,6 +150,12 @@ harnessFrame?.addEventListener("load", () => {
   if (stage) stage.setAttribute("aria-busy", "false");
   if (launchShell) launchShell.setAttribute("aria-hidden", "true");
   document.body.classList.add("is-harness-ready");
+  if (mountedHarnessOrigin !== null) {
+    harnessFrame.contentWindow?.postMessage(
+      { type: HARNESS_THEME_REQUEST },
+      mountedHarnessOrigin,
+    );
+  }
 });
 
 async function pollLaunch(): Promise<void> {

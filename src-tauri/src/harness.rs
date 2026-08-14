@@ -150,7 +150,7 @@ fn start_harness(state: &Arc<Mutex<HarnessProcess>>, window: &WebviewWindow) -> 
 
     let stderr_buffer = Arc::new(Mutex::new(String::new()));
     let stderr_for_thread = Arc::clone(&stderr_buffer);
-    thread::spawn(move || collect_stderr(stderr, stderr_for_thread));
+    let stderr_thread = thread::spawn(move || collect_stderr(stderr, stderr_for_thread));
 
     let mut stdout_lines = BufReader::new(stdout).lines();
     while let Some(line) = stdout_lines.next() {
@@ -183,6 +183,7 @@ fn start_harness(state: &Arc<Mutex<HarnessProcess>>, window: &WebviewWindow) -> 
         }
     }
 
+    let _ = stderr_thread.join();
     let stderr = lock(&stderr_buffer).trim().to_string();
     let suffix = if stderr.is_empty() {
         String::new()
@@ -197,6 +198,12 @@ fn resolve_runtime(window: &WebviewWindow) -> Result<RuntimePaths, String> {
         return source_runtime(PathBuf::from(explicit));
     }
 
+    // `tauri dev` must use the freshly prepared checkout. A stale resource
+    // archive can remain under target/debug after an earlier release build.
+    if cfg!(debug_assertions) {
+        return checkout_runtime();
+    }
+
     if let Ok(resource_dir) = window.app_handle().path().resource_dir() {
         let archive = resource_dir.join("runtime").join("harness.tar.gz");
         let node = resource_dir.join("runtime").join("node.exe");
@@ -205,6 +212,10 @@ fn resolve_runtime(window: &WebviewWindow) -> Result<RuntimePaths, String> {
         }
     }
 
+    checkout_runtime()
+}
+
+fn checkout_runtime() -> Result<RuntimePaths, String> {
     let desktop_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .map(Path::to_path_buf)
@@ -224,9 +235,11 @@ fn source_runtime(path: PathBuf) -> Result<RuntimePaths, String> {
             path.display()
         ));
     }
-    let root = path
-        .canonicalize()
-        .map_err(|error| format!("解析 Harness 路径失败：{error}"))?;
+    // Node.js does not accept the `\\?\C:\...` verbatim form returned by
+    // std::fs::canonicalize on Windows. `dunce` keeps the canonical path while
+    // converting that prefix back to a regular drive/UNC path.
+    let root =
+        dunce::canonicalize(&path).map_err(|error| format!("解析 Harness 路径失败：{error}"))?;
     let node = env::var_os("DSH_DESKTOP_NODE")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("node"));
