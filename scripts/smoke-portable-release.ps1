@@ -57,7 +57,6 @@ try {
     $env:DSH_TELEMETRY_DISABLED = "1"
     $app = Start-Process -FilePath $appPath `
         -WorkingDirectory $portableRoot `
-        -WindowStyle Hidden `
         -PassThru
 
     $deadline = (Get-Date).AddSeconds(90)
@@ -124,9 +123,12 @@ try {
         Start-Sleep -Milliseconds 250
         $app.Refresh()
     } while (
-        [string]::IsNullOrWhiteSpace($app.MainWindowTitle) -and
+        $app.MainWindowHandle -eq [IntPtr]::Zero -and
         (Get-Date) -lt $windowDeadline
     )
+    if ($app.MainWindowHandle -eq [IntPtr]::Zero) {
+        throw "Portable desktop application did not create a main window"
+    }
 
     $harnessUrl = "http://127.0.0.1:$($listener.LocalPort)"
     $evidencePath = Join-Path $repositoryRoot "dist\portable-smoke-result.txt"
@@ -143,6 +145,27 @@ try {
 
     Write-Host "[portable-smoke] Window: $($app.MainWindowTitle)"
     Write-Host "[portable-smoke] Harness: $harnessUrl (HTTP $($response.StatusCode))"
+
+    $nodePid = $nodeProcess.ProcessId
+    if (!$app.CloseMainWindow()) {
+        throw "Portable desktop application did not accept a normal window close"
+    }
+    if (!$app.WaitForExit(15000)) {
+        throw "Portable desktop application did not exit after its window closed"
+    }
+    $nodeDeadline = (Get-Date).AddSeconds(10)
+    while (
+        $null -ne (Get-Process -Id $nodePid -ErrorAction SilentlyContinue) -and
+        (Get-Date) -lt $nodeDeadline
+    ) {
+        Start-Sleep -Milliseconds 250
+    }
+    if ($null -ne (Get-Process -Id $nodePid -ErrorAction SilentlyContinue)) {
+        throw "Harness Node process remained after the desktop window closed"
+    }
+    Add-Content -LiteralPath $evidencePath -Encoding utf8 -Value "shutdown=graceful"
+    $app = $null
+    Write-Host "[portable-smoke] Graceful shutdown passed"
     Write-Host "[portable-smoke] Passed; evidence: $evidencePath"
 } finally {
     if ($null -ne $app) {

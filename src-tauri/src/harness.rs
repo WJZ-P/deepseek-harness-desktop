@@ -17,6 +17,8 @@ use url::Url;
 
 const READY_PREFIX: &str = "dsh web: ";
 const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 struct RuntimePaths {
     root: PathBuf,
@@ -87,11 +89,13 @@ impl HarnessProcess {
 
         #[cfg(windows)]
         {
-            let _ = Command::new("taskkill")
+            let mut terminator = Command::new("taskkill");
+            terminator
                 .args(["/PID", &child.id().to_string(), "/T", "/F"])
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+                .stderr(Stdio::null());
+            suppress_console_window(&mut terminator);
+            let _ = terminator.status();
         }
 
         #[cfg(not(windows))]
@@ -126,10 +130,7 @@ fn start_harness(state: &Arc<Mutex<HarnessProcess>>, window: &WebviewWindow) -> 
         .stdin(Stdio::null());
 
     #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
-    }
+    suppress_console_window(&mut command);
 
     let mut child = command.spawn().map_err(|error| {
         format!(
@@ -357,6 +358,13 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(windows)]
+fn suppress_console_window(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+
+    command.creation_flags(CREATE_NO_WINDOW);
 }
 
 #[cfg(test)]
