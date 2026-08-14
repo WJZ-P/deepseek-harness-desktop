@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": {
+      "../release-runtime/node.exe": "runtime/node.exe",
+      "../release-runtime/harness.tar.gz": "runtime/harness.tar.gz"
+    }
+  }
+}

@@ -1,9 +1,21 @@
 # DeepSeek Harness Desktop
 
-> [!WARNING]
-> **仍在开发完善中，目前暂不可用，预计两天内发布 Release。**
+[![Release](https://img.shields.io/github/v/release/WJZ-P/deepseek-harness-desktop)](https://github.com/WJZ-P/deepseek-harness-desktop/releases)
+[![Release workflow](https://github.com/WJZ-P/deepseek-harness-desktop/actions/workflows/release.yml/badge.svg)](https://github.com/WJZ-P/deepseek-harness-desktop/actions/workflows/release.yml)
+[![Tauri v2](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](https://v2.tauri.app/)
 
-DeepSeek Harness 的 Tauri v2 桌面封装。desktop 仓库直接包含完整的 Harness 源码，桌面层复用现有 Web Client、Typert RPC 与 Cordis profile，不复制 agent loop，也不维护另一套会话实现。
+**DeepSeek Harness 的轻量跨平台 Tauri 桌面端：使用系统 WebView 而不是随应用捆绑 Chromium，同时内置完整 Harness 运行时。**
+
+desktop 仓库直接包含完整的 Harness 源码，桌面层复用现有 Web Client、Typert RPC 与 Cordis profile，不复制 agent loop，也不维护另一套会话实现。`v1.0.0` 提供 Windows x64、Linux x64、macOS Apple Silicon 与 macOS Intel 构建。
+
+## 轻量 Tauri 实现
+
+- **不捆绑 Chromium。** Windows 使用 WebView2，macOS 使用系统 WKWebView，Linux 使用 WebKitGTK；Tauri 层只负责原生窗口与生命周期。
+- **没有第二套业务内核。** Rust 桌面壳仅启动、监督并回收 Harness Host，所有 Agent、会话、工具和插件能力继续由随仓 Harness 源码提供。
+- **薄壳、按需运行。** 前端外壳是少量 HTML/CSS/TypeScript 与 Rust 监督代码；生产版首次启动才把压缩的 Harness 运行时展开到应用数据目录，后续直接复用。
+- **原生窗口体验。** 32px 自绘标题栏、深浅主题实时同步、无控制台闪窗，并保留 Tauri 的小型原生进程模型。
+
+> 完整发行包会内置 Node.js 与 Harness 生产运行时，因此下载体积主要来自可离线运行的 Harness 后端，而不是浏览器内核。
 
 ## 目录结构
 
@@ -44,7 +56,10 @@ flowchart LR
 
 - Node.js `^22.19.0 || >=24.0.0`
 - pnpm
-- Rust stable MSVC toolchain、Microsoft C++ Build Tools 与 WebView2（Windows）
+- Rust stable toolchain
+- Windows：Microsoft C++ Build Tools 与 WebView2
+- macOS：Xcode Command Line Tools
+- Linux：WebKitGTK 4.1、Ayatana AppIndicator、RSVG 与 XDO 开发包
 
 普通克隆即可：
 
@@ -72,35 +87,38 @@ Vite 开发地址固定为 `http://localhost:821`，HMR 使用端口 `822`。Har
 
 Node.js 不在 GUI 进程可见的 `PATH` 中时，可用 `DSH_DESKTOP_NODE` 指定绝对路径。
 
-## 构建 Portable ZIP
+## 构建平台发行包
 
-仓库根目录的 `npm run build` 现在生成解压即用的 Windows x64 portable 包，不再只是 Vite 前端构建：
+在目标操作系统的原生环境中运行：
 
-```powershell
+```bash
 pnpm install
-npm run build
+pnpm run build
+pnpm run verify:release-artifacts
 ```
 
-构建流程会准备 Harness、生成并校验生产依赖闭包、内置当前受支持的 Windows Node.js、执行随机端口 HTTP 200 冒烟，然后编译 Tauri 可执行文件并生成 ZIP。便携版测试还会确认桌面 WebView 已连接该回环页面，并在关闭窗口后回收 Node 进程树。最终可上传 GitHub Release 的文件固定写到：
+构建流程会准备 Harness、生成并校验生产依赖闭包、内置当前平台的 Node.js、执行随机回环端口 HTTP 冒烟，再编译并打包 Tauri 应用。输出与 GitHub Release 保持一致：
 
-```text
-dist/DeepSeek-Harness-Desktop-0.1.0-windows-x64-portable.zip
-dist/DeepSeek-Harness-Desktop-0.1.0-windows-x64-portable.zip.sha256
-```
+| 平台 | Release 资产 |
+| --- | --- |
+| Windows x64 | `DeepSeek-Harness-Desktop-1.0.0-windows-x64-portable.zip` |
+| Linux x64 | `DeepSeek-Harness-Desktop-1.0.0-linux-x64.AppImage`、`.deb` |
+| macOS Apple Silicon | `DeepSeek-Harness-Desktop-1.0.0-macos-arm64.dmg` |
+| macOS Intel | `DeepSeek-Harness-Desktop-1.0.0-macos-x64.dmg` |
 
-解压 ZIP 后直接双击目录中的 `DeepSeek Harness.exe`。`runtime/` 已包含 Node 和 Harness Web 生产运行时；保持 EXE 与该目录放在一起即可，不读取当前源码 checkout，也不要求另外安装 Node.js。首次启动会把压缩运行时展开到应用本地数据目录，后续启动复用同一版本的缓存。
+每个资产都附带独立的 `.sha256` 文件。Windows ZIP 解压后可直接双击 `DeepSeek Harness.exe`；`runtime/` 必须与 EXE 保持在同一目录。Linux 与 macOS 的 Node/Harness 运行时作为 Tauri resource 放入原生包内。首次启动会把 Harness 压缩运行时展开到应用本地数据目录，后续复用同一版本缓存。
 
-构建后可运行 portable 冒烟测试。它会核验 SHA-256、把 ZIP 解压到临时目录、直接启动其中的 EXE，并确认该目录内置的 Node 启动 Harness、取得随机回环地址的 HTTP 200：
+Windows 还可以执行完整便携版冒烟测试；它会解压 ZIP、直接启动 EXE，确认内置 Node、主题桥、随机回环 HTTP、WebView 连接与进程树回收：
 
 ```powershell
 pnpm run test:release
 ```
 
-只构建桌面启动页时可运行 `pnpm run build:frontend`；该命令只产生 Vite 资源，不产生 EXE。
+只构建桌面前端时可运行 `pnpm run build:frontend`；该命令不产生原生发行包。
 
 ## GitHub Actions 自动发布
 
-[`release.yml`](.github/workflows/release.yml) 在推送 `v*` tag 时使用 GitHub 托管的 Windows runner 执行同一套自包含构建。流水线会先校验 tag、`package.json`、Tauri 配置和 Cargo 包版本一致，再解压并冒烟验证 portable 包、上传 ZIP 与 SHA-256 文件为 Actions artifact，并创建公开的 GitHub Release。
+[`release.yml`](.github/workflows/release.yml) 在推送 `v*` tag 时并行使用 Windows x64、Ubuntu 22.04 x64、macOS arm64 与 macOS Intel runner。流水线先校验 tag、`package.json`、Tauri 配置和 Cargo 包版本一致，再分别构建平台包、验证 SHA-256；Windows 额外执行真实 EXE 冒烟测试。所有矩阵任务成功后，独立的 publish job 才会把完整资产集合一次性写入同一个 GitHub Release。
 
 正式版本确认可用后再创建与应用版本一致的 `v*` tag。Release 构建不需要额外密钥；发布权限来自仓库自动提供的 `GITHUB_TOKEN`。
 
@@ -131,7 +149,7 @@ pnpm run harness:verify-source
 
 ## 分发边界
 
-发布目标当前是 Windows x64 portable ZIP。源码仓库仍保留完整 `harness/` 供审计与本地开发；ZIP 携带从这些源码构建并通过冒烟验证的生产运行时，不执行安装，也不注册卸载信息。未签名可执行文件可能触发 Windows SmartScreen 提示；正式发布前可增加代码签名。
+源码仓库保留完整 `harness/` 供审计与本地开发；各平台资产携带从这些源码构建的生产运行时。Windows 使用无安装 portable ZIP，Linux 提供 AppImage 与 DEB，macOS 提供采用 ad-hoc 签名的 DMG。当前产物未使用商业代码签名或 Apple notarization，因此 Windows SmartScreen 或 macOS 隐私与安全设置可能要求用户额外确认。
 
 ## 图标
 

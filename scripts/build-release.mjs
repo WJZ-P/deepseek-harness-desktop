@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import {
   access,
+  chmod,
   copyFile,
   cp,
   lstat,
@@ -21,16 +22,27 @@ const harnessRoot = join(desktopRoot, "harness");
 const releaseRuntime = join(desktopRoot, "release-runtime");
 const stagingRoot = join(releaseRuntime, "harness");
 const archivePath = join(releaseRuntime, "harness.tar.gz");
-const nodePath = join(releaseRuntime, "node.exe");
 const outputRoot = join(desktopRoot, "dist");
+const platformNames = { win32: "windows", linux: "linux", darwin: "macos" };
+const architectureNames = { x64: "x64", arm64: "arm64" };
+const platformName = platformNames[process.platform];
+const architectureName = architectureNames[process.arch];
+if (platformName === undefined || architectureName === undefined) {
+  throw new Error(`Unsupported release host: ${process.platform}-${process.arch}`);
+}
+const nodeBinaryName = process.platform === "win32" ? "node.exe" : "node";
+const nodePath = join(releaseRuntime, nodeBinaryName);
+const executableName = process.platform === "win32"
+  ? "deepseek-harness-desktop.exe"
+  : "deepseek-harness-desktop";
 const tauriExecutable = join(
   desktopRoot,
   "src-tauri",
   "target",
   "release",
-  "deepseek-harness-desktop.exe",
+  executableName,
 );
-const obsoleteBundleRoot = join(
+const bundleRoot = join(
   desktopRoot,
   "src-tauri",
   "target",
@@ -44,6 +56,7 @@ const portableName = `DeepSeek-Harness-Desktop-${packageJson.version}-windows-x6
 const portableRoot = join(outputRoot, portableName);
 const portableArchive = join(outputRoot, `${portableName}.zip`);
 const portableExecutable = join(portableRoot, "DeepSeek Harness.exe");
+const releaseStem = `DeepSeek-Harness-Desktop-${packageJson.version}-${platformName}-${architectureName}`;
 
 function pnpmInvocation(args) {
   if (process.env.npm_execpath?.toLowerCase().includes("pnpm")) {
@@ -263,9 +276,6 @@ async function assertNoSymlinks(directory) {
 }
 
 async function copyNodeRuntime() {
-  if (process.platform !== "win32" || process.arch !== "x64") {
-    throw new Error("The Release EXE build currently targets Windows x64.");
-  }
   const version = process.versions.node.split(".").map(Number);
   const supported =
     (version[0] === 22 && version[1] >= 19) || version[0] >= 24;
@@ -273,7 +283,45 @@ async function copyNodeRuntime() {
     throw new Error(`Node ${process.versions.node} is outside Harness's supported range.`);
   }
   await copyFile(process.execPath, nodePath);
-  console.log(`[release] Embedded Node ${process.versions.node}.`);
+  if (process.platform !== "win32") await chmod(nodePath, 0o755);
+  console.log(
+    `[release] Embedded Node ${process.versions.node} for ${platformName}-${architectureName}.`,
+  );
+}
+
+async function terminateChild(child) {
+  if (child.exitCode !== null) return;
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+    });
+    await new Promise((done) => {
+      const timeout = setTimeout(() => {
+        killer.kill();
+        child.kill();
+        done();
+      }, 5_000);
+      const finish = () => {
+        clearTimeout(timeout);
+        done();
+      };
+      killer.once("exit", finish);
+      killer.once("error", finish);
+    });
+    return;
+  }
+
+  child.kill("SIGTERM");
+  await new Promise((done) => {
+    const timeout = setTimeout(() => {
+      if (child.exitCode === null) child.kill("SIGKILL");
+      done();
+    }, 5_000);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      done();
+    });
+  });
 }
 
 async function smokeRuntime() {
@@ -299,24 +347,7 @@ async function smokeRuntime() {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      if (child.exitCode === null) {
-        const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
-          stdio: "ignore",
-        });
-        await new Promise((done) => {
-          const killTimeout = setTimeout(() => {
-            killer.kill();
-            child.kill();
-            done();
-          }, 5_000);
-          const finishKill = () => {
-            clearTimeout(killTimeout);
-            done();
-          };
-          killer.once("exit", finishKill);
-          killer.once("error", finishKill);
-        });
-      }
+      await terminateChild(child);
       child.stdout.destroy();
       child.stderr.destroy();
       if (error) reject(error);
@@ -330,6 +361,9 @@ async function smokeRuntime() {
         const body = await response.text();
         if (response.status !== 200 || !/<html/i.test(body)) {
           throw new Error(`Harness smoke returned HTTP ${response.status}.`);
+        }
+        if (!body.includes("data-dsh-desktop-theme-bridge")) {
+          throw new Error("Harness smoke response is missing the desktop theme bridge.");
         }
         await finish(undefined, { url: ready[1], bytes: body.length });
       } catch (error) {
@@ -366,8 +400,9 @@ async function smokeRuntime() {
 }
 
 async function archiveHarness() {
+  const tarCommand = process.platform === "win32" ? "tar.exe" : "tar";
   await run(
-    "tar.exe",
+    tarCommand,
     ["-czf", archivePath, "-C", releaseRuntime, "harness"],
     { cwd: desktopRoot },
   );
@@ -379,9 +414,17 @@ async function archiveHarness() {
 async function buildTauri() {
   await Promise.all([
     rm(tauriExecutable, { force: true }),
-    rm(obsoleteBundleRoot, { recursive: true, force: true }),
+    rm(bundleRoot, { recursive: true, force: true }),
   ]);
-  const invocation = pnpmInvocation(["tauri", "build", "--no-bundle"]);
+  const args = ["tauri", "build", "--ci"];
+  if (process.platform === "win32") {
+    args.push("--no-bundle");
+  } else if (process.platform === "linux") {
+    args.push("--bundles", "appimage,deb");
+  } else {
+    args.push("--bundles", "app,dmg");
+  }
+  const invocation = pnpmInvocation(args);
   await run(invocation.command, invocation.args);
   if (!(await pathExists(tauriExecutable))) {
     throw new Error(`Tauri executable was not created: ${tauriExecutable}`);
@@ -389,11 +432,14 @@ async function buildTauri() {
 }
 
 async function publishPortable() {
+  if (process.platform !== "win32" || process.arch !== "x64") {
+    throw new Error("The portable ZIP publisher is reserved for Windows x64.");
+  }
   await rm(outputRoot, { recursive: true, force: true });
   await mkdir(join(portableRoot, "runtime"), { recursive: true });
   await Promise.all([
     copyFile(tauriExecutable, portableExecutable),
-    copyFile(nodePath, join(portableRoot, "runtime", "node.exe")),
+    copyFile(nodePath, join(portableRoot, "runtime", nodeBinaryName)),
     copyFile(archivePath, join(portableRoot, "runtime", "harness.tar.gz")),
     writeFile(
       join(portableRoot, "README.txt"),
@@ -423,6 +469,61 @@ async function publishPortable() {
   );
 }
 
+async function findFiles(directory, predicate) {
+  const matches = [];
+  if (!(await pathExists(directory))) return matches;
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) matches.push(...await findFiles(path, predicate));
+    else if (entry.isFile() && predicate(path)) matches.push(path);
+  }
+  return matches;
+}
+
+async function publishBundle(sourceSuffix, outputSuffix) {
+  const matches = await findFiles(
+    bundleRoot,
+    (path) => path.toLowerCase().endsWith(sourceSuffix.toLowerCase()),
+  );
+  if (matches.length !== 1) {
+    throw new Error(
+      `Expected one ${sourceSuffix} bundle under ${bundleRoot}, found ${matches.length}:\n${matches.join("\n")}`,
+    );
+  }
+
+  const destination = join(outputRoot, `${releaseStem}${outputSuffix}`);
+  await copyFile(matches[0], destination);
+  if (outputSuffix === ".AppImage") await chmod(destination, 0o755);
+  await writeChecksum(destination);
+  const artifact = await stat(destination);
+  console.log(
+    `[release] Bundle ready: ${destination} (${(artifact.size / 1024 / 1024).toFixed(1)} MiB)`,
+  );
+}
+
+async function publishPlatformBundles() {
+  await rm(outputRoot, { recursive: true, force: true });
+  await mkdir(outputRoot, { recursive: true });
+  if (process.platform === "linux") {
+    await publishBundle(".AppImage", ".AppImage");
+    await publishBundle(".deb", ".deb");
+    return;
+  }
+  if (process.platform === "darwin") {
+    await publishBundle(".dmg", ".dmg");
+    return;
+  }
+  throw new Error(`No native bundle publisher for ${process.platform}`);
+}
+
+async function writeChecksum(path) {
+  const name = basename(path);
+  await writeFile(
+    `${path}.sha256`,
+    await hashFile(path).then((hash) => `${hash}  ${name}\n`),
+  );
+}
+
 async function hashFile(path) {
   const { createHash } = await import("node:crypto");
   const { createReadStream } = await import("node:fs");
@@ -442,4 +543,5 @@ await copyNodeRuntime();
 await smokeRuntime();
 await archiveHarness();
 await buildTauri();
-await publishPortable();
+if (process.platform === "win32") await publishPortable();
+else await publishPlatformBundles();

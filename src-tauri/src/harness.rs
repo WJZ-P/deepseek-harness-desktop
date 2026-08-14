@@ -18,6 +18,10 @@ use url::Url;
 const READY_PREFIX: &str = "dsh web: ";
 const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[cfg(windows)]
+const NODE_BINARY_NAME: &str = "node.exe";
+#[cfg(not(windows))]
+const NODE_BINARY_NAME: &str = "node";
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 struct RuntimePaths {
@@ -206,7 +210,7 @@ fn resolve_runtime(window: &WebviewWindow) -> Result<RuntimePaths, String> {
 
     if let Ok(resource_dir) = window.app_handle().path().resource_dir() {
         let archive = resource_dir.join("runtime").join("harness.tar.gz");
-        let node = resource_dir.join("runtime").join("node.exe");
+        let node = resource_dir.join("runtime").join(NODE_BINARY_NAME);
         if has_content(&archive) && has_content(&node) {
             return installed_runtime(window, &archive, node);
         }

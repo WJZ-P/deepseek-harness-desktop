@@ -29,6 +29,6 @@ The Tauri WebView remains on the packaged desktop origin so the custom titlebar 
 
 ## Release packaging
 
-Development always uses the freshly prepared vendored checkout, even when an older release archive remains under `target/debug`. The Windows Release build deploys the CLI production closure, materializes workspace peer packages, stages a supported `node.exe` beside the Tauri executable, and stores the Harness tree as a compressed runtime resource. The release artifact is a portable ZIP rather than an installer. First launch extracts the versioned tree under the application's local data directory; subsequent launches reuse it.
+Development always uses the freshly prepared vendored checkout, even when an older release archive remains under `target/debug`. Every platform Release build deploys the CLI production closure, materializes workspace peer packages, stages the native Node executable, and stores the Harness tree as a compressed Tauri resource. Windows publishes a portable ZIP, Linux publishes AppImage and DEB bundles, and macOS publishes architecture-specific DMGs. First launch extracts the versioned tree under the application's local data directory; subsequent launches reuse it.
 
 Both modes preserve the same process protocol: `stdout` readiness, a random loopback HTTP/WebSocket origin, and process-tree teardown. The packaged resolver is therefore a distribution change rather than a second runtime architecture.

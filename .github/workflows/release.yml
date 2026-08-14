@@ -13,15 +13,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  windows-x64:
-    name: Build and publish Windows x64 portable ZIP
-    runs-on: windows-latest
-    timeout-minutes: 60
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            os: windows-latest
+          - target: linux-x64
+            os: ubuntu-22.04
+          - target: macos-arm64
+            os: macos-15
+          - target: macos-x64
+            os: macos-15-intel
 
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            patchelf
 
       - uses: pnpm/action-setup@v4
 
@@ -36,61 +59,78 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Verify release version
-        shell: pwsh
-        run: |
-          $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
-          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          $cargoVersion = [regex]::Match(
-            (Get-Content src-tauri/Cargo.toml -Raw),
-            '(?m)^version = "([^"]+)"$'
-          ).Groups[1].Value
-          $versions = @($packageVersion, $tauriVersion, $cargoVersion)
-          if ($versions.Where({ $_ -ne $tagVersion }).Count -gt 0) {
-            throw "Tag $env:GITHUB_REF_NAME does not match package versions: $($versions -join ', ')"
-          }
+        run: node scripts/verify-release-version.mjs
 
       - name: Install desktop dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build self-contained portable ZIP
-        run: npm run build
+      - name: Build self-contained platform release
+        run: pnpm run build
+        env:
+          CI: "true"
 
-      - name: Smoke-test extracted portable application
+      - name: Smoke-test Windows portable application
+        if: runner.os == 'Windows'
         run: pnpm run test:release
 
-      - name: Verify release artifacts
-        shell: pwsh
-        run: |
-          $version = $env:GITHUB_REF_NAME -replace '^v', ''
-          $zip = "dist/DeepSeek-Harness-Desktop-$version-windows-x64-portable.zip"
-          if (!(Test-Path -LiteralPath $zip)) { throw "Missing $zip" }
-          if (!(Test-Path -LiteralPath "$zip.sha256")) { throw "Missing $zip.sha256" }
-          Get-Item -LiteralPath $zip, "$zip.sha256" | Format-Table Name, Length
+      - name: Verify checksums and expected platform artifacts
+        run: node scripts/verify-built-artifacts.mjs
 
       - uses: actions/upload-artifact@v7
         with:
-          name: DeepSeek-Harness-Desktop-${{ github.ref_name }}-windows-x64-portable
+          name: release-${{ matrix.target }}
           path: |
             dist/*.zip
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.deb
             dist/*.sha256
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish GitHub Release
-        shell: pwsh
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify complete release asset set
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          required=(
+            "DeepSeek-Harness-Desktop-${version}-windows-x64-portable.zip"
+            "DeepSeek-Harness-Desktop-${version}-linux-x64.AppImage"
+            "DeepSeek-Harness-Desktop-${version}-linux-x64.deb"
+            "DeepSeek-Harness-Desktop-${version}-macos-arm64.dmg"
+            "DeepSeek-Harness-Desktop-${version}-macos-x64.dmg"
+          )
+          for asset in "${required[@]}"; do
+            test -s "release-assets/${asset}"
+            test -s "release-assets/${asset}.sha256"
+          done
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Create or update GitHub Release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $version = $env:GITHUB_REF_NAME -replace '^v', ''
-          $zip = "dist/DeepSeek-Harness-Desktop-$version-windows-x64-portable.zip"
-          if (gh release view $env:GITHUB_REF_NAME 2>$null) {
-            gh release upload $env:GITHUB_REF_NAME $zip "$zip.sha256" --clobber
-          } else {
-            gh release create $env:GITHUB_REF_NAME `
-              $zip `
-              "$zip.sha256" `
-              --verify-tag `
-              --generate-notes `
-              --title "DeepSeek Harness Desktop $env:GITHUB_REF_NAME"
-          }
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              release-assets/* \
+              --verify-tag \
+              --generate-notes \
+              --title "DeepSeek Harness Desktop $GITHUB_REF_NAME"
+          fi

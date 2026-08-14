@@ -1,7 +1,8 @@
 {
   "name": "deepseek-harness-desktop",
+  "description": "A lightweight, cross-platform Tauri desktop shell for DeepSeek Harness—using the system WebView instead of bundling Chromium, with the complete Harness runtime included.",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "packageManager": "pnpm@11.7.0",
   "engines": {
@@ -14,6 +15,7 @@
     "build:frontend": "pnpm run harness:prepare && tsc && vite build",
     "build:release": "pnpm run build",
     "test:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-portable-release.ps1",
+    "verify:release-artifacts": "node scripts/verify-built-artifacts.mjs",
     "check": "pnpm run harness:verify-source && tsc --noEmit && cargo check --manifest-path src-tauri/Cargo.toml",
     "harness:prepare": "node scripts/prepare-harness.mjs",
     "harness:verify-source": "node scripts/check-vendored-harness.mjs",
