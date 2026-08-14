@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   windows-x64:
-    name: Build and publish Windows x64 installer
+    name: Build and publish Windows x64 portable ZIP
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -53,26 +53,26 @@ jobs:
       - name: Install desktop dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build self-contained NSIS installer
+      - name: Build self-contained portable ZIP
         run: npm run build
 
-      - name: Smoke-test installed application
+      - name: Smoke-test extracted portable application
         run: pnpm run test:release
 
       - name: Verify release artifacts
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
-          $exe = "dist/DeepSeek-Harness-Desktop-$version-windows-x64-setup.exe"
-          if (!(Test-Path -LiteralPath $exe)) { throw "Missing $exe" }
-          if (!(Test-Path -LiteralPath "$exe.sha256")) { throw "Missing $exe.sha256" }
-          Get-Item -LiteralPath $exe, "$exe.sha256" | Format-Table Name, Length
+          $zip = "dist/DeepSeek-Harness-Desktop-$version-windows-x64-portable.zip"
+          if (!(Test-Path -LiteralPath $zip)) { throw "Missing $zip" }
+          if (!(Test-Path -LiteralPath "$zip.sha256")) { throw "Missing $zip.sha256" }
+          Get-Item -LiteralPath $zip, "$zip.sha256" | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v7
         with:
-          name: DeepSeek-Harness-Desktop-${{ github.ref_name }}-windows-x64
+          name: DeepSeek-Harness-Desktop-${{ github.ref_name }}-windows-x64-portable
           path: |
-            dist/*.exe
+            dist/*.zip
             dist/*.sha256
           if-no-files-found: error
           retention-days: 14
@@ -83,13 +83,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
-          $exe = "dist/DeepSeek-Harness-Desktop-$version-windows-x64-setup.exe"
+          $zip = "dist/DeepSeek-Harness-Desktop-$version-windows-x64-portable.zip"
           if (gh release view $env:GITHUB_REF_NAME 2>$null) {
-            gh release upload $env:GITHUB_REF_NAME $exe "$exe.sha256" --clobber
+            gh release upload $env:GITHUB_REF_NAME $zip "$zip.sha256" --clobber
           } else {
             gh release create $env:GITHUB_REF_NAME `
-              $exe `
-              "$exe.sha256" `
+              $zip `
+              "$zip.sha256" `
               --verify-tag `
               --generate-notes `
               --title "DeepSeek Harness Desktop $env:GITHUB_REF_NAME"

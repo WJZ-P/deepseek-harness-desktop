@@ -13,7 +13,7 @@
     "build": "node scripts/build-release.mjs",
     "build:frontend": "pnpm run harness:prepare && tsc && vite build",
     "build:release": "pnpm run build",
-    "test:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-installed-release.ps1",
+    "test:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-portable-release.ps1",
     "check": "pnpm run harness:verify-source && tsc --noEmit && cargo check --manifest-path src-tauri/Cargo.toml",
     "harness:prepare": "node scripts/prepare-harness.mjs",
     "harness:verify-source": "node scripts/check-vendored-harness.mjs",

@@ -1,5 +1,5 @@
 param(
-    [string]$InstallerPath
+    [string]$ArchivePath
 )
 
 Set-StrictMode -Version Latest
@@ -8,30 +8,27 @@ $ErrorActionPreference = "Stop"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $package = Get-Content -LiteralPath (Join-Path $repositoryRoot "package.json") -Raw |
     ConvertFrom-Json
-if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
-    $InstallerPath = Join-Path $repositoryRoot (
-        "dist\DeepSeek-Harness-Desktop-{0}-windows-x64-setup.exe" -f $package.version
-    )
+$portableName = "DeepSeek-Harness-Desktop-{0}-windows-x64-portable" -f $package.version
+if ([string]::IsNullOrWhiteSpace($ArchivePath)) {
+    $ArchivePath = Join-Path $repositoryRoot "dist\$portableName.zip"
 }
-$installer = (Resolve-Path -LiteralPath $InstallerPath).Path
-$checksumPath = "$installer.sha256"
+$archive = (Resolve-Path -LiteralPath $ArchivePath).Path
+$checksumPath = "$archive.sha256"
 if (!(Test-Path -LiteralPath $checksumPath -PathType Leaf)) {
-    throw "Missing installer checksum: $checksumPath"
+    throw "Missing portable archive checksum: $checksumPath"
 }
 
 $expectedHash = ((Get-Content -LiteralPath $checksumPath -Raw).Trim() -split "\s+")[0]
-$actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
+$actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
 if (![string]::Equals($expectedHash, $actualHash, [StringComparison]::OrdinalIgnoreCase)) {
-    throw "Installer SHA-256 does not match $checksumPath"
+    throw "Portable archive SHA-256 does not match $checksumPath"
 }
 
 $smokeRoot = Join-Path ([IO.Path]::GetTempPath()) (
-    "dsh-desktop-smoke-{0}" -f [guid]::NewGuid().ToString("N")
+    "dsh-desktop-portable-smoke-{0}" -f [guid]::NewGuid().ToString("N")
 )
-$installRoot = Join-Path $smokeRoot "install"
 $dshHome = Join-Path $smokeRoot "home"
 $app = $null
-$uninstalled = $false
 $originalDshHome = [Environment]::GetEnvironmentVariable("DSH_HOME", "Process")
 $originalTelemetry = [Environment]::GetEnvironmentVariable(
     "DSH_TELEMETRY_DISABLED",
@@ -40,32 +37,26 @@ $originalTelemetry = [Environment]::GetEnvironmentVariable(
 
 try {
     New-Item -ItemType Directory -Path $smokeRoot, $dshHome -Force | Out-Null
-    Write-Host "[install-smoke] Installing $installer"
-    $setup = Start-Process -FilePath $installer `
-        -ArgumentList @("/S", "/D=$installRoot") `
-        -WindowStyle Hidden `
-        -Wait `
-        -PassThru
-    if ($setup.ExitCode -ne 0) {
-        throw "NSIS installer exited with code $($setup.ExitCode)"
-    }
+    Write-Host "[portable-smoke] Extracting $archive"
+    Expand-Archive -LiteralPath $archive -DestinationPath $smokeRoot
 
-    $appPath = Join-Path $installRoot "deepseek-harness-desktop.exe"
-    $nodePath = Join-Path $installRoot "runtime\node.exe"
-    $archivePath = Join-Path $installRoot "runtime\harness.tar.gz"
-    foreach ($path in @($appPath, $nodePath, $archivePath)) {
+    $portableRoot = Join-Path $smokeRoot $portableName
+    $appPath = Join-Path $portableRoot "DeepSeek Harness.exe"
+    $nodePath = Join-Path $portableRoot "runtime\node.exe"
+    $harnessArchivePath = Join-Path $portableRoot "runtime\harness.tar.gz"
+    foreach ($path in @($appPath, $nodePath, $harnessArchivePath)) {
         if (!(Test-Path -LiteralPath $path -PathType Leaf)) {
-            throw "Installed release is missing $path"
+            throw "Portable release is missing $path"
         }
         if ((Get-Item -LiteralPath $path).Length -eq 0) {
-            throw "Installed release contains an empty file: $path"
+            throw "Portable release contains an empty file: $path"
         }
     }
 
     $env:DSH_HOME = $dshHome
     $env:DSH_TELEMETRY_DISABLED = "1"
     $app = Start-Process -FilePath $appPath `
-        -WorkingDirectory $installRoot `
+        -WorkingDirectory $portableRoot `
         -WindowStyle Hidden `
         -PassThru
 
@@ -77,7 +68,7 @@ try {
         Start-Sleep -Milliseconds 500
         $app.Refresh()
         if ($app.HasExited) {
-            throw "Installed desktop application exited with code $($app.ExitCode)"
+            throw "Portable desktop application exited with code $($app.ExitCode)"
         }
 
         $nodeProcess = Get-CimInstance Win32_Process -Filter (
@@ -116,7 +107,7 @@ try {
     }
 
     if ($null -eq $response -or $null -eq $nodeProcess -or $null -eq $listener) {
-        throw "Installed desktop application did not expose the Harness page within 90 seconds"
+        throw "Portable desktop application did not expose the Harness page within 90 seconds"
     }
     if (
         ![string]::Equals(
@@ -125,7 +116,7 @@ try {
             [StringComparison]::OrdinalIgnoreCase
         )
     ) {
-        throw "Desktop application used an external Node executable: $($nodeProcess.ExecutablePath)"
+        throw "Portable application used an external Node executable: $($nodeProcess.ExecutablePath)"
     }
 
     $windowDeadline = (Get-Date).AddSeconds(10)
@@ -138,11 +129,11 @@ try {
     )
 
     $harnessUrl = "http://127.0.0.1:$($listener.LocalPort)"
-    $evidencePath = Join-Path $repositoryRoot "dist\install-smoke-result.txt"
+    $evidencePath = Join-Path $repositoryRoot "dist\portable-smoke-result.txt"
     @(
-        "installer=$installer"
+        "archive=$archive"
         "sha256=$($actualHash.ToLowerInvariant())"
-        "installed_exe=$appPath"
+        "portable_exe=$appPath"
         "node_executable=$($nodeProcess.ExecutablePath)"
         "window_title=$($app.MainWindowTitle)"
         "harness_url=$harnessUrl"
@@ -150,48 +141,15 @@ try {
         "html_bytes=$($response.RawContentLength)"
     ) | Set-Content -LiteralPath $evidencePath -Encoding utf8
 
-    Write-Host "[install-smoke] Window: $($app.MainWindowTitle)"
-    Write-Host "[install-smoke] Harness: $harnessUrl (HTTP $($response.StatusCode))"
-    Write-Host "[install-smoke] Passed; evidence: $evidencePath"
-
-    taskkill.exe /PID $app.Id /T /F | Out-Null
-    Wait-Process -Id $app.Id -Timeout 15 -ErrorAction SilentlyContinue
-    $app = $null
-
-    $uninstaller = Get-ChildItem -LiteralPath $installRoot `
-        -File `
-        -Filter "*uninstall*.exe" |
-        Select-Object -First 1
-    if ($null -eq $uninstaller) {
-        throw "Installed release does not contain an uninstaller"
-    }
-    $uninstall = Start-Process -FilePath $uninstaller.FullName `
-        -ArgumentList "/S" `
-        -WindowStyle Hidden `
-        -Wait `
-        -PassThru
-    if ($uninstall.ExitCode -ne 0) {
-        throw "NSIS uninstaller exited with code $($uninstall.ExitCode)"
-    }
-    $uninstalled = $true
+    Write-Host "[portable-smoke] Window: $($app.MainWindowTitle)"
+    Write-Host "[portable-smoke] Harness: $harnessUrl (HTTP $($response.StatusCode))"
+    Write-Host "[portable-smoke] Passed; evidence: $evidencePath"
 } finally {
     if ($null -ne $app) {
         $app.Refresh()
         if (!$app.HasExited) {
             taskkill.exe /PID $app.Id /T /F | Out-Null
-        }
-    }
-    if (!$uninstalled -and (Test-Path -LiteralPath $installRoot -PathType Container)) {
-        $fallbackUninstaller = Get-ChildItem -LiteralPath $installRoot `
-            -File `
-            -Filter "*uninstall*.exe" `
-            -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($null -ne $fallbackUninstaller) {
-            Start-Process -FilePath $fallbackUninstaller.FullName `
-                -ArgumentList "/S" `
-                -WindowStyle Hidden `
-                -Wait | Out-Null
+            Wait-Process -Id $app.Id -Timeout 15 -ErrorAction SilentlyContinue
         }
     }
     [Environment]::SetEnvironmentVariable("DSH_HOME", $originalDshHome, "Process")

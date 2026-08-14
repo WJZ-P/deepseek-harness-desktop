@@ -27,6 +27,6 @@ Agent behavior, tools, RPC methods, persistence, workspace access, and client co
 
 ## Release packaging
 
-Development uses the installed Node executable plus the built vendored checkout. The Windows Release build deploys the CLI production closure, materializes workspace peer packages, embeds a supported `node.exe`, and stores the Harness tree as a compressed Tauri resource. First launch extracts the versioned tree under the application's local data directory; subsequent launches reuse it.
+Development uses the installed Node executable plus the built vendored checkout. The Windows Release build deploys the CLI production closure, materializes workspace peer packages, stages a supported `node.exe` beside the Tauri executable, and stores the Harness tree as a compressed runtime resource. The release artifact is a portable ZIP rather than an installer. First launch extracts the versioned tree under the application's local data directory; subsequent launches reuse it.
 
 Both modes preserve the same process protocol: `stdout` readiness, a random loopback HTTP/WebSocket origin, and process-tree teardown. The packaged resolver is therefore a distribution change rather than a second runtime architecture.

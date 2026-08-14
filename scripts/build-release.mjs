@@ -23,18 +23,27 @@ const stagingRoot = join(releaseRuntime, "harness");
 const archivePath = join(releaseRuntime, "harness.tar.gz");
 const nodePath = join(releaseRuntime, "node.exe");
 const outputRoot = join(desktopRoot, "dist");
-const tauriBundleRoot = join(
+const tauriExecutable = join(
+  desktopRoot,
+  "src-tauri",
+  "target",
+  "release",
+  "deepseek-harness-desktop.exe",
+);
+const obsoleteBundleRoot = join(
   desktopRoot,
   "src-tauri",
   "target",
   "release",
   "bundle",
-  "nsis",
 );
 const packageJson = JSON.parse(
   await readFile(join(desktopRoot, "package.json"), "utf8"),
 );
-const artifactName = `DeepSeek-Harness-Desktop-${packageJson.version}-windows-x64-setup.exe`;
+const portableName = `DeepSeek-Harness-Desktop-${packageJson.version}-windows-x64-portable`;
+const portableRoot = join(outputRoot, portableName);
+const portableArchive = join(outputRoot, `${portableName}.zip`);
+const portableExecutable = join(portableRoot, "DeepSeek Harness.exe");
 
 function pnpmInvocation(args) {
   if (process.env.npm_execpath?.toLowerCase().includes("pnpm")) {
@@ -368,30 +377,49 @@ async function archiveHarness() {
 }
 
 async function buildTauri() {
-  await rm(tauriBundleRoot, { recursive: true, force: true });
-  const invocation = pnpmInvocation(["tauri", "build", "--bundles", "nsis"]);
+  await Promise.all([
+    rm(tauriExecutable, { force: true }),
+    rm(obsoleteBundleRoot, { recursive: true, force: true }),
+  ]);
+  const invocation = pnpmInvocation(["tauri", "build", "--no-bundle"]);
   await run(invocation.command, invocation.args);
+  if (!(await pathExists(tauriExecutable))) {
+    throw new Error(`Tauri executable was not created: ${tauriExecutable}`);
+  }
 }
 
-async function publishArtifact() {
-  const candidates = (await readdir(tauriBundleRoot))
-    .filter((name) => name.toLowerCase().endsWith(".exe"))
-    .map((name) => join(tauriBundleRoot, name));
-  if (candidates.length !== 1) {
-    throw new Error(
-      `Expected one NSIS setup EXE in ${tauriBundleRoot}, found ${candidates.length}.`,
-    );
-  }
-  await mkdir(outputRoot, { recursive: true });
-  const artifactPath = join(outputRoot, artifactName);
-  await copyFile(candidates[0], artifactPath);
-  const artifact = await stat(artifactPath);
+async function publishPortable() {
+  await rm(outputRoot, { recursive: true, force: true });
+  await mkdir(join(portableRoot, "runtime"), { recursive: true });
+  await Promise.all([
+    copyFile(tauriExecutable, portableExecutable),
+    copyFile(nodePath, join(portableRoot, "runtime", "node.exe")),
+    copyFile(archivePath, join(portableRoot, "runtime", "harness.tar.gz")),
+    writeFile(
+      join(portableRoot, "README.txt"),
+      [
+        "DeepSeek Harness Desktop portable build",
+        "",
+        "Double-click DeepSeek Harness.exe to start.",
+        "Keep the executable and runtime directory together.",
+        "No separate Node.js or Harness checkout is required.",
+        "",
+      ].join("\r\n"),
+    ),
+  ]);
+  await run(
+    "tar.exe",
+    ["-a", "-cf", portableArchive, "-C", outputRoot, portableName],
+    { cwd: desktopRoot },
+  );
+  const artifact = await stat(portableArchive);
+  const archiveName = basename(portableArchive);
   await writeFile(
-    `${artifactPath}.sha256`,
-    await hashFile(artifactPath).then((hash) => `${hash}  ${artifactName}\n`),
+    `${portableArchive}.sha256`,
+    await hashFile(portableArchive).then((hash) => `${hash}  ${archiveName}\n`),
   );
   console.log(
-    `[release] EXE ready: ${artifactPath} (${(artifact.size / 1024 / 1024).toFixed(1)} MiB)`,
+    `[release] Portable ZIP ready: ${portableArchive} (${(artifact.size / 1024 / 1024).toFixed(1)} MiB)`,
   );
 }
 
@@ -414,4 +442,4 @@ await copyNodeRuntime();
 await smokeRuntime();
 await archiveHarness();
 await buildTauri();
-await publishArtifact();
+await publishPortable();
