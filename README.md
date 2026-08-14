@@ -11,7 +11,7 @@ DeepSeek Harness 的 Tauri v2 桌面封装。desktop 仓库直接包含完整的
 deepseek-harness-desktop/
 ├─ harness/          # 由本仓库直接跟踪的完整 DeepSeek Harness 源码
 ├─ scripts/          # 首次运行准备脚本
-├─ src/              # Tauri 启动/错误页
+├─ src/              # 持久桌面外壳、自绘标题栏与启动/错误页
 ├─ src-tauri/        # Rust 窗口与 Harness 进程监督器
 └─ package.json
 ```
@@ -26,14 +26,16 @@ flowchart LR
   B --> C["Cordis web profile"]
   C --> D["Host API and session log"]
   C --> E["Injected client plugin graph"]
-  A -->|"navigate after readiness"| F["System WebView"]
-  F -->|"HTTP POST and WebSocket"| C
+  A -->|"mount after readiness"| F["Persistent desktop shell"]
+  E --> G["Harness iframe"]
+  F --> G
+  G -->|"HTTP POST and WebSocket"| C
 ```
 
-- Rust 层默认从仓库内 `harness/` 启动 `apps/cli/lib/bin.js web --host 127.0.0.1 --port 0`，读取 `dsh web:` 就绪行后才导航主窗口。
+- Rust 层默认从仓库内 `harness/` 启动 `apps/cli/lib/bin.js web --host 127.0.0.1 --port 0`，读取 `dsh web:` 就绪行后才把随机回环地址交给桌面外壳加载。
 - WebView 使用 Harness 分配的随机回环端口，因此复用现有 Host fence、`/api` 传输和两条 WebSocket 下行流。
 - 关闭窗口或应用时，桌面层回收整个 Node 子进程树。
-- 启动页是 desktop 唯一新增的前端；Harness 主界面仍由 `harness/apps/web/dist` 提供。
+- Desktop 外壳拥有跟随 Tauri 窗口主题的启动页和自绘标题栏；标题栏在 Harness 主界面载入后继续保留，主界面内容仍由 `harness/apps/web/dist` 提供。
 - `DEEPSEEK_HARNESS_ROOT` 可显式覆盖仓库内源码路径，供临时调试其他 Harness checkout 使用。
 
 ## 克隆并运行
@@ -79,7 +81,7 @@ pnpm install
 npm run build
 ```
 
-构建流程会准备 Harness、生成并校验生产依赖闭包、内置当前受支持的 Windows Node.js、执行随机端口 HTTP 200 冒烟，然后编译 Tauri 可执行文件并生成 ZIP。最终可上传 GitHub Release 的文件固定写到：
+构建流程会准备 Harness、生成并校验生产依赖闭包、内置当前受支持的 Windows Node.js、执行随机端口 HTTP 200 冒烟，然后编译 Tauri 可执行文件并生成 ZIP。便携版测试还会确认桌面 WebView 已连接该回环页面，并在关闭窗口后回收 Node 进程树。最终可上传 GitHub Release 的文件固定写到：
 
 ```text
 dist/DeepSeek-Harness-Desktop-0.1.0-windows-x64-portable.zip

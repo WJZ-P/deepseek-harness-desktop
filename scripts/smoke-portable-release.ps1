@@ -35,6 +35,29 @@ $originalTelemetry = [Environment]::GetEnvironmentVariable(
     "Process"
 )
 
+function Test-ProcessDescendant {
+    param(
+        [int]$ProcessId,
+        [int]$AncestorId
+    )
+
+    $visited = @{}
+    while ($ProcessId -gt 0 -and !$visited.ContainsKey($ProcessId)) {
+        if ($ProcessId -eq $AncestorId) {
+            return $true
+        }
+        $visited[$ProcessId] = $true
+        $process = Get-CimInstance Win32_Process -Filter (
+            "ProcessId = {0}" -f $ProcessId
+        )
+        if ($null -eq $process) {
+            return $false
+        }
+        $ProcessId = $process.ParentProcessId
+    }
+    return $false
+}
+
 try {
     New-Item -ItemType Directory -Path $smokeRoot, $dshHome -Force | Out-Null
     Write-Host "[portable-smoke] Extracting $archive"
@@ -130,6 +153,35 @@ try {
         throw "Portable desktop application did not create a main window"
     }
 
+    $webviewProcess = $null
+    $webviewDeadline = (Get-Date).AddSeconds(15)
+    do {
+        Start-Sleep -Milliseconds 250
+        $connections = Get-NetTCPConnection `
+            -RemoteAddress "127.0.0.1" `
+            -RemotePort $listener.LocalPort `
+            -State Established `
+            -ErrorAction SilentlyContinue
+        foreach ($connection in $connections) {
+            $candidate = Get-CimInstance Win32_Process -Filter (
+                "ProcessId = {0}" -f $connection.OwningProcess
+            )
+            if (
+                $null -ne $candidate -and
+                $candidate.Name -eq "msedgewebview2.exe" -and
+                (Test-ProcessDescendant `
+                    -ProcessId $candidate.ProcessId `
+                    -AncestorId $app.Id)
+            ) {
+                $webviewProcess = $candidate
+                break
+            }
+        }
+    } while ($null -eq $webviewProcess -and (Get-Date) -lt $webviewDeadline)
+    if ($null -eq $webviewProcess) {
+        throw "Desktop WebView did not load the Harness loopback page"
+    }
+
     $harnessUrl = "http://127.0.0.1:$($listener.LocalPort)"
     $evidencePath = Join-Path $repositoryRoot "dist\portable-smoke-result.txt"
     @(
@@ -141,10 +193,13 @@ try {
         "harness_url=$harnessUrl"
         "http_status=$([int]$response.StatusCode)"
         "html_bytes=$($response.RawContentLength)"
+        "webview_process=$($webviewProcess.ProcessId)"
+        "webview_connection=established"
     ) | Set-Content -LiteralPath $evidencePath -Encoding utf8
 
     Write-Host "[portable-smoke] Window: $($app.MainWindowTitle)"
     Write-Host "[portable-smoke] Harness: $harnessUrl (HTTP $($response.StatusCode))"
+    Write-Host "[portable-smoke] WebView iframe connection established"
 
     $nodePid = $nodeProcess.ProcessId
     if (!$app.CloseMainWindow()) {

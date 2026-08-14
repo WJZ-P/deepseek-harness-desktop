@@ -8,10 +8,39 @@
     <script type="module" src="/src/main.ts" defer></script>
   </head>
   <body>
-    <main class="launch-shell">
-      <section class="launch-stage" aria-live="polite" aria-busy="true">
-        <div class="loader-visual" aria-hidden="true">
-          <svg viewBox="0 0 300 300" role="presentation">
+    <div class="desktop-shell">
+      <header class="titlebar" data-tauri-drag-region>
+        <div class="titlebar-brand" data-tauri-drag-region>
+          <span class="titlebar-mark" aria-hidden="true"></span>
+          <span data-tauri-drag-region>DeepSeek Harness</span>
+        </div>
+        <div class="window-controls">
+          <button class="window-control" id="window-minimize" type="button" aria-label="最小化">
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M2 6.5h8" />
+            </svg>
+          </button>
+          <button class="window-control" id="window-maximize" type="button" aria-label="最大化">
+            <svg class="maximize-glyph" viewBox="0 0 12 12" aria-hidden="true">
+              <rect x="2.25" y="2.25" width="7.5" height="7.5" rx=".5" />
+            </svg>
+            <svg class="restore-glyph" viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M4 4V2.5h5.5V8H8M2.5 4H8v5.5H2.5z" />
+            </svg>
+          </button>
+          <button class="window-control window-close" id="window-close" type="button" aria-label="关闭">
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <path d="m2.5 2.5 7 7m0-7-7 7" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="desktop-content">
+        <main class="launch-shell">
+          <section class="launch-stage" aria-live="polite" aria-busy="true">
+            <div class="loader-visual" aria-hidden="true">
+              <svg viewBox="0 0 440 440" role="presentation">
             <defs>
               <path
                 id="whale-shape"
@@ -20,36 +49,44 @@
               />
             </defs>
 
-            <g class="orbit-entrance">
-              <g class="orbit-spin">
-                <circle class="orbit-arc orbit-arc-long" cx="150" cy="150" r="124" pathLength="100" />
-                <circle class="orbit-arc orbit-arc-medium" cx="150" cy="150" r="124" pathLength="100" />
-                <circle class="orbit-arc orbit-arc-short" cx="150" cy="150" r="124" pathLength="100" />
-              </g>
-            </g>
+                <g class="orbit-entrance">
+                  <g class="orbit-spin">
+                    <circle class="orbit-ring" cx="220" cy="220" r="194" pathLength="120" />
+                  </g>
+                </g>
 
-            <g transform="translate(79 79) scale(2.84)">
-              <g class="whale-entry">
-                <use class="whale-fill" href="#whale-shape" />
-                <use class="whale-outline" href="#whale-shape" />
-              </g>
-            </g>
-          </svg>
-        </div>
+                <g transform="translate(78 78) scale(5.68)">
+                  <g class="whale-entry">
+                    <use class="whale-fill" href="#whale-shape" />
+                    <use class="whale-outline" href="#whale-shape" />
+                  </g>
+                </g>
+              </svg>
+            </div>
 
-        <div class="launch-copy">
-          <h1 id="launch-title">DeepSeek Harness 加载中</h1>
-          <p id="launch-detail">正在创建本地服务并装载插件…</p>
-        </div>
+            <div class="launch-copy">
+              <h1 id="launch-title">DeepSeek Harness 加载中</h1>
+              <p id="launch-detail">正在创建本地服务并装载插件…</p>
+            </div>
 
-        <div class="failure-panel" id="launch-failure" hidden>
-          <pre id="launch-error"></pre>
-          <div class="actions" id="launch-actions">
-            <button type="button" id="retry">重试</button>
-            <button type="button" class="secondary" id="copy-error">复制错误</button>
-          </div>
+            <div class="failure-panel" id="launch-failure" hidden>
+              <pre id="launch-error"></pre>
+              <div class="actions" id="launch-actions">
+                <button type="button" id="retry">重试</button>
+                <button type="button" class="secondary" id="copy-error">复制错误</button>
+              </div>
+            </div>
+          </section>
+        </main>
+
+        <div class="harness-surface" id="harness-surface" hidden>
+          <iframe
+            id="harness-frame"
+            title="DeepSeek Harness 工作区"
+            allow="clipboard-read; clipboard-write"
+          ></iframe>
         </div>
-      </section>
-    </main>
+      </div>
+    </div>
   </body>
 </html>

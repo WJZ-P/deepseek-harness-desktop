@@ -162,9 +162,6 @@ fn start_harness(state: &Arc<Mutex<HarnessProcess>>, window: &WebviewWindow) -> 
                 url.host_str().unwrap_or("127.0.0.1"),
                 url.port_or_known_default().unwrap_or(80)
             );
-            window
-                .navigate(url.clone())
-                .map_err(|error| format!("打开 Harness 页面失败：{error}"))?;
             let mut process = lock(state);
             process.snapshot = LaunchSnapshot {
                 phase: LaunchPhase::Ready,
