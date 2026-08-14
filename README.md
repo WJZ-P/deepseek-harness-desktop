@@ -133,7 +133,9 @@ pnpm run harness:verify-source
 
 ## 图标
 
-图标源文件是仓库根目录的 [`app-icon.svg`](app-icon.svg)，当前与 Harness Web UI 的鲸鱼 favicon 保持一致。Tauri 平台图标位于 `src-tauri/icons/`；更新源图后在本目录重新生成：
+图标源文件是仓库根目录的 [`app-icon.svg`](app-icon.svg)，当前与 Harness Web UI 的鲸鱼 favicon 保持一致。加载页使用同一条鲸鱼路径；静态浅色与深色版本分别保存在 [`src/assets/whale-icon-light.svg`](src/assets/whale-icon-light.svg) 和 [`src/assets/whale-icon-dark.svg`](src/assets/whale-icon-dark.svg)。深色版本使用 `--dsw-alias-label-primary`，其回退值是 `#F9FAFB` / `rgb(249, 250, 251)`，供后续深色加载页适配使用。
+
+Tauri 平台图标位于 `src-tauri/icons/`；更新源图后在本目录重新生成：
 
 ```powershell
 pnpm tauri icon app-icon.svg
