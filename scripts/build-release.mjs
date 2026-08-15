@@ -243,6 +243,29 @@ async function materializeHarnessClosure() {
   console.log(`[release] Verified ${runtimeSeen.size} runtime packages.`);
 }
 
+async function pruneIncompatibleNativeVariants() {
+  if (process.platform !== "linux") return;
+
+  // The x64 Koffi package ships glibc and musl addons together. AppImage and
+  // our Ubuntu build target use glibc; leaving the unused musl addon in the
+  // expanded resource tree makes linuxdeploy look for libc.musl-x86_64.so.1.
+  const incompatiblePaths = [
+    join(
+      stagingRoot,
+      "node_modules",
+      "@koromix",
+      "koffi-linux-x64",
+      "musl_x64",
+    ),
+  ];
+  for (const path of incompatiblePaths) {
+    if (await pathExists(path)) {
+      await rm(path, { recursive: true, force: true });
+      console.log(`[release] Removed incompatible native runtime variant: ${path}`);
+    }
+  }
+}
+
 async function indexWorkspacePackages() {
   const packages = new Map();
   const ignored = new Set([".git", "dist", "lib", "node_modules", "target"]);
@@ -571,6 +594,7 @@ async function hashFile(path) {
 await prepareHarness();
 await deployCli();
 await materializeHarnessClosure();
+await pruneIncompatibleNativeVariants();
 await copyNodeRuntime();
 await smokeRuntime();
 await buildTauri();
