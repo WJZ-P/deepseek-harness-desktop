@@ -18,7 +18,6 @@
   --loader-muted: var(--dsw-alias-label-secondary);
   --progress-track: rgba(0, 0, 0, .1);
   --progress-step: rgba(0, 0, 0, .2);
-  --progress-note-bg: rgba(0, 0, 0, .035);
   --error-bg: rgb(249, 250, 251);
   --error-border: rgba(0, 0, 0, .1);
 }
@@ -58,7 +57,6 @@ body[data-ds-dark-theme] {
   --loader-muted: var(--dsw-alias-label-secondary);
   --progress-track: rgba(255, 255, 255, .14);
   --progress-step: rgba(255, 255, 255, .24);
-  --progress-note-bg: rgba(255, 255, 255, .055);
   --error-bg: var(--dsw-alias-bg-layer-1);
   --error-border: rgba(255, 255, 255, .12);
 }
@@ -306,24 +304,6 @@ h1 {
   line-height: 1.65;
 }
 
-.cold-start-note {
-  width: fit-content;
-  max-width: 100%;
-  margin: 10px auto 0;
-  padding: 7px 12px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 999px;
-  color: var(--loader-muted);
-  background: var(--progress-note-bg);
-  font-size: 12px;
-  line-height: 1.5;
-  transition: border-color 220ms ease, background-color 220ms ease, color 220ms ease;
-}
-
-.cold-start-note[hidden] {
-  display: none;
-}
-
 .launch-progress {
   width: min(520px, 86vw);
   margin-top: clamp(16px, 2.4vh, 24px);
@@ -551,8 +531,7 @@ body.is-failed .loader-visual {
   width: min(360px, 68vw);
 }
 
-body.is-failed .launch-progress,
-body.is-failed .cold-start-note {
+body.is-failed .launch-progress {
   display: none;
 }
 
@@ -661,7 +640,6 @@ body.is-failed .cold-start-note {
     --loader-muted: var(--dsw-alias-label-secondary);
     --progress-track: rgba(255, 255, 255, .14);
     --progress-step: rgba(255, 255, 255, .24);
-    --progress-note-bg: rgba(255, 255, 255, .055);
     --error-bg: var(--dsw-alias-bg-layer-1);
     --error-border: rgba(255, 255, 255, .12);
   }
@@ -678,11 +656,6 @@ body.is-failed .cold-start-note {
 
   .launch-progress {
     margin-top: 12px;
-  }
-
-  .cold-start-note {
-    margin-top: 6px;
-    padding-block: 5px;
   }
 }
 

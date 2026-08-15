@@ -2,7 +2,7 @@
   "name": "deepseek-harness-desktop",
   "description": "A lightweight, cross-platform Tauri desktop shell for DeepSeek Harness—using the system WebView instead of bundling Chromium, with the complete Harness runtime included.",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "packageManager": "pnpm@11.7.0",
   "engines": {

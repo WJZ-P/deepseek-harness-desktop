@@ -8,7 +8,6 @@ import {
 type LaunchStage =
   | "locatingRuntime"
   | "checkingRuntime"
-  | "extractingRuntime"
   | "verifyingRuntime"
   | "startingService"
   | "waitingForService"
@@ -21,7 +20,6 @@ interface LaunchStatus {
   progress: number;
   detail: string;
   url: string | null;
-  coldStart: boolean;
 }
 
 interface StagePresentation {
@@ -42,7 +40,6 @@ const HARNESS_THEME_REQUEST = "deepseek-harness:theme-request";
 const title = document.querySelector<HTMLElement>("#launch-title");
 const kicker = document.querySelector<HTMLElement>("#launch-kicker");
 const detail = document.querySelector<HTMLElement>("#launch-detail");
-const coldStartNote = document.querySelector<HTMLElement>("#cold-start-note");
 const progressLabel = document.querySelector<HTMLElement>("#progress-label");
 const progressValue = document.querySelector<HTMLElement>("#progress-value");
 const progressTrack = document.querySelector<HTMLElement>("#progress-track");
@@ -79,13 +76,7 @@ const STAGE_PRESENTATION: Record<LaunchStage, StagePresentation> = {
     step: 0,
     kicker: "步骤 1/3 · 准备运行时",
     title: "正在检查运行环境",
-    progressLabel: "检查运行时缓存",
-  },
-  extractingRuntime: {
-    step: 0,
-    kicker: "步骤 1/3 · 首次启动准备",
-    title: "正在完成首次启动",
-    progressLabel: "展开 Harness 运行时",
+    progressLabel: "读取便携运行时",
   },
   verifyingRuntime: {
     step: 0,
@@ -226,13 +217,6 @@ function renderLaunchStatus(status: LaunchStatus): void {
   if (progressLabel) progressLabel.textContent = presentation.progressLabel;
   setProgress(status.progress);
   renderSteps(presentation.step);
-
-  if (coldStartNote) {
-    coldStartNote.hidden = !status.coldStart;
-    coldStartNote.textContent = status.stage === "extractingRuntime"
-      ? "首次启动正在展开本地运行时，通常需要十几秒；请保持窗口开启，完成后再次启动会明显更快。"
-      : "首次运行时已经准备完成，接下来的启动步骤通常只需要几秒。";
-  }
 }
 
 function showFailure(message: string): void {
@@ -240,7 +224,6 @@ function showFailure(message: string): void {
   if (title) title.textContent = "Harness 启动失败";
   if (detail) detail.textContent = "请检查路径、构建产物和 Node.js 环境。";
   if (progressLabel) progressLabel.textContent = "启动中断";
-  if (coldStartNote) coldStartNote.hidden = true;
   if (error) error.textContent = message;
   if (failure) failure.hidden = false;
   if (stage) stage.setAttribute("aria-busy", "false");

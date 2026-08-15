@@ -1,7 +1,7 @@
 <p align="center">
   <img
     src="docs/assets/deepseek-harness-desktop-banner.png"
-    alt="DeepSeek Harness Desktop 首次启动界面"
+    alt="DeepSeek Harness Desktop 启动界面"
     width="100%"
   />
 </p>
@@ -49,7 +49,7 @@
 | macOS Intel | DMG | 适用于 Intel 芯片 |
 
 > [!TIP]
-> **首次启动不是卡住啦 (｡•̀ᴗ-)✧** 发行版需要把压缩的 Harness 运行时展开到应用数据目录，通常会花费十几秒。启动页会实时显示“准备运行时 → 启动本地服务 → 载入工作区”、解压百分比和已处理项目数；完成后再次启动会明显更快。
+> **资源就在身边啦 (｡•̀ᴗ-)✧** Windows portable ZIP 内已经放入展开后的 `runtime/harness/`。把整个 ZIP 解压一次后，应用会直接读取 EXE 旁边的运行时，不再二次解压，也不会复制一份到 AppData；源码入口、前端资源与生产依赖都能在当前文件夹中直接找到。
 
 Windows 便携版无需另外安装 Node.js，也无需准备 Harness 源码目录。请保持 `DeepSeek Harness.exe` 与 `runtime/` 在同一个目录中。
 
@@ -63,7 +63,7 @@ Windows 便携版无需另外安装 Node.js，也无需准备 Harness 源码目�
 | 🪶 **轻量** | 使用系统 WebView；Windows 是 WebView2，macOS 是 WKWebView，Linux 是 WebKitGTK，不随应用捆绑 Chromium。 |
 | 🧩 **能力完整** | 继续使用 Harness 的 Agent、会话、工具、插件、Typert RPC 与 Cordis profile，没有第二套业务内核。 |
 | 📦 **真正便携** | 各平台发行包内置匹配平台的 Node.js 与完整生产运行时，用户不需要手动配置开发环境。 |
-| 🐋 **启动有反馈** | 首次展开运行时会报告真实进度；后续启动复用版本缓存，不再重复解压。 |
+| 🐋 **启动有反馈** | 启动页按“读取便携运行时 → 启动本地服务 → 载入工作区”展示真实阶段，不用再等待 AppData 解压。 |
 | 🎨 **原生体验** | 32px 自绘标题栏、深浅主题同步、优雅的鲸鱼加载动画，并抑制后台控制台闪窗。 |
 | 🔍 **源码完整** | `harness/` 由本仓库直接跟踪，不是 Git 子模块；普通 clone 就能获得完整源码。 |
 
@@ -114,7 +114,7 @@ deepseek-harness-desktop/
 ├─ harness/         # 本仓库直接跟踪的完整 DeepSeek Harness 源码
 ├─ scripts/         # Harness 准备、发行构建与验证脚本
 ├─ src/             # 桌面外壳、自绘标题栏与启动/错误页
-├─ src-tauri/       # Rust 窗口、运行时展开与进程监督器
+├─ src-tauri/       # Rust 窗口、便携运行时定位与进程监督器
 ├─ app-icon.svg     # 应用图标源文件
 └─ package.json
 ```
@@ -136,7 +136,7 @@ flowchart LR
 ```
 
 - 开发模式直接从 `harness/apps/cli/lib/bin.js` 启动。
-- 发行模式从内置 `harness.tar.gz` 展开生产运行时，再执行 `lib/bin.js web --host 127.0.0.1 --port 0`。
+- 发行模式直接从应用资源目录的 `runtime/harness/` 执行 `lib/bin.js web --host 127.0.0.1 --port 0`，不创建 AppData 运行时副本。
 - Rust 进程读取 `dsh web:` 就绪行，仅接受 `127.0.0.1` 随机端口，再交给桌面 WebView 加载。
 - WebView 继续复用现有 Host fence、`/api` 传输和两条 WebSocket 下行流。
 - 关闭窗口或应用时，桌面层会回收整个 Node 子进程树。
@@ -166,7 +166,7 @@ pnpm run build
 pnpm run verify:release-artifacts
 ```
 
-构建流程会依次准备 Harness、生成并校验生产依赖闭包、内置当前平台 Node.js、执行随机回环端口 HTTP 冒烟，再编译并打包 Tauri 应用。
+构建流程会依次准备 Harness、生成并校验生产依赖闭包、内置当前平台 Node.js、执行随机回环端口 HTTP 冒烟，再把展开后的生产运行时作为 Tauri resource 编译并打包。Windows portable ZIP 中会保留可直接浏览的 `runtime/harness/` 原始目录结构。
 
 | 平台 | Release 资产命名 |
 | --- | --- |
@@ -175,9 +175,9 @@ pnpm run verify:release-artifacts
 | macOS Apple Silicon | `DeepSeek-Harness-Desktop-<version>-macos-arm64.dmg` |
 | macOS Intel | `DeepSeek-Harness-Desktop-<version>-macos-x64.dmg` |
 
-每个资产都会附带独立的 `.sha256` 文件。Linux 与 macOS 的 Node/Harness 运行时作为 Tauri resource 放入原生包；Windows 则使用无需安装的 portable ZIP。
+每个资产都会附带独立的 `.sha256` 文件。Linux 与 macOS 的 Node/Harness 目录作为 Tauri resource 放入原生包；Windows 则使用无需安装的 portable ZIP，并从 EXE 相邻目录直接启动运行时。
 
-Windows 的完整便携版冒烟测试会确认内置 Node、主题桥、随机回环 HTTP、WebView 连接与进程树回收：
+Windows 的完整便携版冒烟测试会确认展开目录直启、没有新增 AppData 运行时副本、内置 Node、主题桥、随机回环 HTTP、WebView 连接与进程树回收：
 
 ```powershell
 pnpm run test:release
@@ -189,7 +189,7 @@ pnpm run test:release
 
 流水线会先验证 tag、`package.json`、Tauri 配置和 Cargo 版本一致，再构建并验证所有平台产物；只有矩阵任务全部成功后，publish job 才会一次性更新 GitHub Release。
 
-- Release 显示名称直接使用 tag，例如 `v1.0.0`；
+- Release 显示名称直接使用 tag，例如 `v1.0.1`；
 - 已存在的同名 Release 会覆盖旧资产；
 - 构建不需要额外密钥，发布权限来自仓库的 `GITHUB_TOKEN`；
 - 单个平台构建最长运行 90 分钟。
@@ -237,7 +237,7 @@ pnpm tauri icon app-icon.svg
 ## 📄 源码与分发边界
 
 - 源码仓库保留完整 `harness/`，供审计、本地开发与二次构建；
-- Release 资产携带从仓库源码生成的生产运行时，而不是开发依赖树；
+- Release 资产携带从仓库源码生成的展开式生产运行时，而不是开发依赖树；Windows 用户可以直接浏览 EXE 旁边的 `runtime/harness/`；
 - Windows 使用 portable ZIP，Linux 提供 AppImage 与 DEB，macOS 提供 ad-hoc 签名的 DMG；
 - 桌面层与 Harness 上游的许可信息分别见 [`LICENSE`](LICENSE) 和 [`HARNESS_UPSTREAM.md`](HARNESS_UPSTREAM.md)。
 

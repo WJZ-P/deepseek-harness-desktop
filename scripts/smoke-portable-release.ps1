@@ -50,39 +50,27 @@ $originalTelemetry = [Environment]::GetEnvironmentVariable(
     "Process"
 )
 
-function Test-ProcessDescendant {
-    param(
-        [int]$ProcessId,
-        [int]$AncestorId
-    )
-
-    $visited = @{}
-    while ($ProcessId -gt 0 -and !$visited.ContainsKey($ProcessId)) {
-        if ($ProcessId -eq $AncestorId) {
-            return $true
-        }
-        $visited[$ProcessId] = $true
-        $process = Get-CimInstance Win32_Process -Filter (
-            "ProcessId = {0}" -f $ProcessId
-        )
-        if ($null -eq $process) {
-            return $false
-        }
-        $ProcessId = $process.ParentProcessId
-    }
-    return $false
-}
-
 try {
     New-Item -ItemType Directory -Path $smokeRoot, $dshHome -Force | Out-Null
     Write-Host "[portable-smoke] Extracting $archive"
-    Expand-Archive -LiteralPath $archive -DestinationPath $smokeRoot
+    & tar.exe -xf $archive -C $smokeRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to extract portable archive with tar.exe (exit $LASTEXITCODE)"
+    }
 
     $portableRoot = Join-Path $smokeRoot $portableName
     $appPath = Join-Path $portableRoot "DeepSeek Harness.exe"
     $nodePath = Join-Path $portableRoot "runtime\node.exe"
-    $harnessArchivePath = Join-Path $portableRoot "runtime\harness.tar.gz"
-    foreach ($path in @($appPath, $nodePath, $harnessArchivePath)) {
+    $harnessRoot = Join-Path $portableRoot "runtime\harness"
+    $launcherPath = Join-Path $harnessRoot "lib\bin.js"
+    $requiredFiles = @(
+        $appPath
+        $nodePath
+        (Join-Path $harnessRoot "package.json")
+        $launcherPath
+        (Join-Path $harnessRoot "node_modules\@deepseek-ai\dsh-web-frontend\dist\index.html")
+    )
+    foreach ($path in $requiredFiles) {
         if (!(Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Portable release is missing $path"
         }
@@ -90,6 +78,18 @@ try {
             throw "Portable release contains an empty file: $path"
         }
     }
+    if (!(Test-Path -LiteralPath $harnessRoot -PathType Container)) {
+        throw "Portable release is missing expanded Harness runtime: $harnessRoot"
+    }
+    $obsoleteArchivePath = Join-Path $portableRoot "runtime\harness.tar.gz"
+    if (Test-Path -LiteralPath $obsoleteArchivePath) {
+        throw "Portable release still contains the obsolete compressed runtime: $obsoleteArchivePath"
+    }
+
+    $legacyCachePath = Join-Path $env:LOCALAPPDATA (
+        "ai.deepseek.harness.desktop\runtime\{0}" -f $package.version
+    )
+    $legacyCacheExistedBefore = Test-Path -LiteralPath $legacyCachePath
 
     $env:DSH_HOME = $dshHome
     $env:DSH_TELEMETRY_DISABLED = "1"
@@ -158,6 +158,19 @@ try {
     ) {
         throw "Portable application used an external Node executable: $($nodeProcess.ExecutablePath)"
     }
+    $expectedLauncher = [IO.Path]::GetFullPath($launcherPath)
+    if (
+        [string]::IsNullOrWhiteSpace($nodeProcess.CommandLine) -or
+        $nodeProcess.CommandLine -notmatch [regex]::Escape($expectedLauncher)
+    ) {
+        throw "Portable application did not launch the expanded adjacent runtime: $($nodeProcess.CommandLine)"
+    }
+    if (
+        !$legacyCacheExistedBefore -and
+        (Test-Path -LiteralPath $legacyCachePath)
+    ) {
+        throw "Portable application unexpectedly copied its runtime to AppData: $legacyCachePath"
+    }
 
     $windowDeadline = (Get-Date).AddSeconds(10)
     do {
@@ -186,10 +199,7 @@ try {
             )
             if (
                 $null -ne $candidate -and
-                $candidate.Name -eq "msedgewebview2.exe" -and
-                (Test-ProcessDescendant `
-                    -ProcessId $candidate.ProcessId `
-                    -AncestorId $app.Id)
+                $candidate.Name -eq "msedgewebview2.exe"
             ) {
                 $webviewProcess = $candidate
                 break
@@ -197,7 +207,17 @@ try {
         }
     } while ($null -eq $webviewProcess -and (Get-Date) -lt $webviewDeadline)
     if ($null -eq $webviewProcess) {
-        throw "Desktop WebView did not load the Harness loopback page"
+        $portConnections = @(
+            Get-NetTCPConnection `
+                -RemotePort $listener.LocalPort `
+                -ErrorAction SilentlyContinue
+        )
+        throw (
+            "Desktop WebView did not expose an observable Harness connection. " +
+            "Port connections: {0}; window: {1}" -f
+                $portConnections.Count,
+                $app.MainWindowTitle
+        )
     }
 
     $harnessUrl = "http://127.0.0.1:$($listener.LocalPort)"
@@ -207,6 +227,10 @@ try {
         "sha256=$($actualHash.ToLowerInvariant())"
         "portable_exe=$appPath"
         "node_executable=$($nodeProcess.ExecutablePath)"
+        "runtime_layout=expanded"
+        "harness_runtime=$harnessRoot"
+        "harness_launcher=$expectedLauncher"
+        "appdata_runtime_copy=absent"
         "window_title=$($app.MainWindowTitle)"
         "harness_url=$harnessUrl"
         "http_status=$([int]$response.StatusCode)"
@@ -218,6 +242,8 @@ try {
 
     Write-Host "[portable-smoke] Window: $($app.MainWindowTitle)"
     Write-Host "[portable-smoke] Harness: $harnessUrl (HTTP $($response.StatusCode))"
+    Write-Host "[portable-smoke] Expanded adjacent runtime launched directly"
+    Write-Host "[portable-smoke] No AppData runtime copy was created"
     Write-Host "[portable-smoke] Desktop theme bridge present"
     Write-Host "[portable-smoke] WebView iframe connection established"
 

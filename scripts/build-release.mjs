@@ -21,7 +21,6 @@ const desktopRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const harnessRoot = join(desktopRoot, "harness");
 const releaseRuntime = join(desktopRoot, "release-runtime");
 const stagingRoot = join(releaseRuntime, "harness");
-const archivePath = join(releaseRuntime, "harness.tar.gz");
 const outputRoot = join(desktopRoot, "dist");
 const platformNames = { win32: "windows", linux: "linux", darwin: "macos" };
 const architectureNames = { x64: "x64", arm64: "arm64" };
@@ -417,24 +416,20 @@ async function smokeRuntime() {
   console.log(`[release] Harness smoke passed at ${result.url} (${result.bytes} bytes).`);
 }
 
-async function archiveHarness() {
-  const tarCommand = process.platform === "win32" ? "tar.exe" : "tar";
-  await run(
-    tarCommand,
-    ["-czf", archivePath, "-C", releaseRuntime, "harness"],
-    { cwd: desktopRoot },
-  );
-  await rm(stagingRoot, { recursive: true, force: true });
-  const archive = await stat(archivePath);
-  console.log(`[release] Packed Harness runtime (${(archive.size / 1024 / 1024).toFixed(1)} MiB).`);
-}
-
 async function buildTauri() {
   await Promise.all([
     rm(tauriExecutable, { force: true }),
     rm(bundleRoot, { recursive: true, force: true }),
   ]);
-  const args = ["tauri", "build", "--ci"];
+  const resourceConfig = JSON.stringify({
+    bundle: {
+      resources: {
+        [`../release-runtime/${nodeBinaryName}`]: `runtime/${nodeBinaryName}`,
+        "../release-runtime/harness": "runtime/harness",
+      },
+    },
+  });
+  const args = ["tauri", "build", "--ci", "--config", resourceConfig];
   if (process.platform === "win32") {
     args.push("--no-bundle");
   } else if (process.platform === "linux") {
@@ -458,7 +453,10 @@ async function publishPortable() {
   await Promise.all([
     copyFile(tauriExecutable, portableExecutable),
     copyFile(nodePath, join(portableRoot, "runtime", nodeBinaryName)),
-    copyFile(archivePath, join(portableRoot, "runtime", "harness.tar.gz")),
+    cp(stagingRoot, join(portableRoot, "runtime", "harness"), {
+      recursive: true,
+      dereference: true,
+    }),
     writeFile(
       join(portableRoot, "README.txt"),
       [
@@ -466,6 +464,7 @@ async function publishPortable() {
         "",
         "Double-click DeepSeek Harness.exe to start.",
         "Keep the executable and runtime directory together.",
+        "The expanded Harness runtime is available under runtime\\harness.",
         "No separate Node.js or Harness checkout is required.",
         "",
       ].join("\r\n"),
@@ -559,7 +558,6 @@ await deployCli();
 await materializeHarnessClosure();
 await copyNodeRuntime();
 await smokeRuntime();
-await archiveHarness();
 await buildTauri();
 if (process.platform === "win32") await publishPortable();
 else await publishPlatformBundles();

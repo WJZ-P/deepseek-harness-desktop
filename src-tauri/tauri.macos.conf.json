@@ -3,10 +3,6 @@
   "bundle": {
     "macOS": {
       "signingIdentity": "-"
-    },
-    "resources": {
-      "../release-runtime/node": "runtime/node",
-      "../release-runtime/harness.tar.gz": "runtime/harness.tar.gz"
     }
   }
 }
