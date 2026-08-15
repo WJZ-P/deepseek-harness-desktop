@@ -241,6 +241,10 @@ pnpm tauri icon app-icon.svg
 - Windows 使用 portable ZIP，Linux 提供 AppImage 与 DEB，macOS 提供 ad-hoc 签名的 DMG；
 - 桌面层与 Harness 上游的许可信息分别见 [`LICENSE`](LICENSE) 和 [`HARNESS_UPSTREAM.md`](HARNESS_UPSTREAM.md)。
 
+## 🤝 社区支持
+
+本项目支持 **[Linux Do 社区](https://linux.do/)**。欢迎大家前往社区交流技术、分享经验，一起友善地探索更多有趣的可能～ (｡•̀ᴗ-)✧
+
 <p align="center">
   <strong>愿这只小鲸鱼轻轻巧巧，也能把事情认真做好～</strong><br />
   ʚ(｡˃ ᵕ ˂ )ɞ
