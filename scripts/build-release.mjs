@@ -429,7 +429,14 @@ async function buildTauri() {
       },
     },
   });
-  const args = ["tauri", "build", "--ci", "--config", resourceConfig];
+  const args = [
+    "tauri",
+    "build",
+    "--ci",
+    "--verbose",
+    "--config",
+    resourceConfig,
+  ];
   if (process.platform === "win32") {
     args.push("--no-bundle");
   } else if (process.platform === "linux") {
@@ -438,7 +445,15 @@ async function buildTauri() {
     args.push("--bundles", "app,dmg");
   }
   const invocation = pnpmInvocation(args);
-  await run(invocation.command, invocation.args);
+  const buildEnvironment = process.platform === "linux"
+    ? {
+        ...process.env,
+        // linuxdeploy otherwise tries to strip the embedded Node runtime and
+        // native Harness addons while walking the expanded Tauri resources.
+        NO_STRIP: "1",
+      }
+    : process.env;
+  await run(invocation.command, invocation.args, { env: buildEnvironment });
   if (!(await pathExists(tauriExecutable))) {
     throw new Error(`Tauri executable was not created: ${tauriExecutable}`);
   }
