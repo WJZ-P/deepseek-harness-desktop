@@ -4,7 +4,10 @@ use std::{
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     thread,
     time::SystemTime,
 };
@@ -34,8 +37,11 @@ struct RuntimePaths {
 #[serde(rename_all = "camelCase")]
 pub struct LaunchSnapshot {
     phase: LaunchPhase,
+    stage: LaunchStage,
+    progress: u8,
     detail: String,
     url: Option<String>,
+    cold_start: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -44,6 +50,32 @@ enum LaunchPhase {
     Starting,
     Ready,
     Failed,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum LaunchStage {
+    LocatingRuntime,
+    CheckingRuntime,
+    ExtractingRuntime,
+    VerifyingRuntime,
+    StartingService,
+    WaitingForService,
+    LoadingWorkspace,
+    Failed,
+}
+
+struct ProgressReader<R> {
+    inner: R,
+    bytes_read: Arc<AtomicU64>,
+}
+
+impl<R: Read> Read for ProgressReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buffer)?;
+        self.bytes_read.fetch_add(read as u64, Ordering::Relaxed);
+        Ok(read)
+    }
 }
 
 pub struct HarnessProcess {
@@ -57,8 +89,11 @@ impl HarnessProcess {
             child: None,
             snapshot: LaunchSnapshot {
                 phase: LaunchPhase::Starting,
-                detail: "正在定位 DeepSeek Harness…".into(),
+                stage: LaunchStage::LocatingRuntime,
+                progress: 3,
+                detail: "正在定位内置 Harness 运行时…".into(),
                 url: None,
+                cold_start: false,
             },
         }
     }
@@ -72,10 +107,15 @@ impl HarnessProcess {
             if let Err(error) = start_harness(&state, &window) {
                 eprintln!("deepseek-harness-desktop: {error}");
                 let mut process = lock(&state);
+                let progress = process.snapshot.progress;
+                let cold_start = process.snapshot.cold_start;
                 process.snapshot = LaunchSnapshot {
                     phase: LaunchPhase::Failed,
+                    stage: LaunchStage::Failed,
+                    progress,
                     detail: error,
                     url: None,
+                    cold_start,
                 };
                 process.stop_child();
             }
@@ -118,11 +158,13 @@ impl Drop for HarnessProcess {
 }
 
 fn start_harness(state: &Arc<Mutex<HarnessProcess>>, window: &WebviewWindow) -> Result<(), String> {
-    let runtime = resolve_runtime(window)?;
+    let runtime = resolve_runtime(state, window)?;
 
-    update_starting(
+    update_launch(
         state,
-        format!("正在从 {} 启动 Web profile…", runtime.root.display()),
+        LaunchStage::StartingService,
+        76,
+        "正在启动 Harness 本地服务…".into(),
     );
     let mut command = Command::new(&runtime.node);
     command
@@ -152,6 +194,13 @@ fn start_harness(state: &Arc<Mutex<HarnessProcess>>, window: &WebviewWindow) -> 
         .ok_or_else(|| "未取得 Harness 错误输出".to_string())?;
     lock(state).child = Some(child);
 
+    update_launch(
+        state,
+        LaunchStage::WaitingForService,
+        86,
+        "本地服务进程已启动，正在等待随机端口就绪…".into(),
+    );
+
     let stderr_buffer = Arc::new(Mutex::new(String::new()));
     let stderr_for_thread = Arc::clone(&stderr_buffer);
     let stderr_thread = thread::spawn(move || collect_stderr(stderr, stderr_for_thread));
@@ -169,8 +218,11 @@ fn start_harness(state: &Arc<Mutex<HarnessProcess>>, window: &WebviewWindow) -> 
             let mut process = lock(state);
             process.snapshot = LaunchSnapshot {
                 phase: LaunchPhase::Ready,
-                detail: "DeepSeek Harness 已就绪".into(),
+                stage: LaunchStage::LoadingWorkspace,
+                progress: 96,
+                detail: "本地服务已就绪，正在载入 Harness 工作区…".into(),
                 url: Some(allowed_origin),
+                cold_start: process.snapshot.cold_start,
             };
             eprintln!("deepseek-harness-desktop: Harness ready at {url}");
             thread::spawn(move || {
@@ -197,25 +249,52 @@ fn start_harness(state: &Arc<Mutex<HarnessProcess>>, window: &WebviewWindow) -> 
     Err(format!("Harness 在就绪前退出，未输出本地 URL。{suffix}"))
 }
 
-fn resolve_runtime(window: &WebviewWindow) -> Result<RuntimePaths, String> {
+fn resolve_runtime(
+    state: &Arc<Mutex<HarnessProcess>>,
+    window: &WebviewWindow,
+) -> Result<RuntimePaths, String> {
     if let Some(explicit) = env::var_os("DEEPSEEK_HARNESS_ROOT") {
+        update_launch(
+            state,
+            LaunchStage::CheckingRuntime,
+            18,
+            "正在检查指定的 Harness 开发运行时…".into(),
+        );
         return source_runtime(PathBuf::from(explicit));
     }
 
     // `tauri dev` must use the freshly prepared checkout. A stale resource
     // archive can remain under target/debug after an earlier release build.
     if cfg!(debug_assertions) {
+        update_launch(
+            state,
+            LaunchStage::CheckingRuntime,
+            18,
+            "正在检查仓库内 Harness 构建产物…".into(),
+        );
         return checkout_runtime();
     }
 
     if let Ok(resource_dir) = window.app_handle().path().resource_dir() {
+        update_launch(
+            state,
+            LaunchStage::CheckingRuntime,
+            8,
+            "正在检查本地运行时缓存…".into(),
+        );
         let archive = resource_dir.join("runtime").join("harness.tar.gz");
         let node = resource_dir.join("runtime").join(NODE_BINARY_NAME);
         if has_content(&archive) && has_content(&node) {
-            return installed_runtime(window, &archive, node);
+            return installed_runtime(state, window, &archive, node);
         }
     }
 
+    update_launch(
+        state,
+        LaunchStage::CheckingRuntime,
+        18,
+        "正在检查仓库内 Harness 构建产物…".into(),
+    );
     checkout_runtime()
 }
 
@@ -255,6 +334,7 @@ fn source_runtime(path: PathBuf) -> Result<RuntimePaths, String> {
 }
 
 fn installed_runtime(
+    state: &Arc<Mutex<HarnessProcess>>,
     window: &WebviewWindow,
     archive: &Path,
     node: PathBuf,
@@ -269,28 +349,108 @@ fn installed_runtime(
     let root = cache_root.join("harness");
     let marker = cache_root.join(".ready");
     if !marker_matches(&marker, archive) || !is_installed_root(&root) {
+        mark_cold_start(state);
         if cache_root.exists() {
+            update_launch(
+                state,
+                LaunchStage::ExtractingRuntime,
+                10,
+                "正在清理未完成的运行时缓存…".into(),
+            );
             fs::remove_dir_all(&cache_root)
                 .map_err(|error| format!("清理旧 Harness 运行时失败：{error}"))?;
         }
         fs::create_dir_all(&cache_root)
             .map_err(|error| format!("创建 Harness 运行时目录失败：{error}"))?;
-        let file =
-            File::open(archive).map_err(|error| format!("打开内置 Harness 运行时失败：{error}"))?;
-        Archive::new(GzDecoder::new(file))
-            .unpack(&cache_root)
-            .map_err(|error| format!("解压内置 Harness 运行时失败：{error}"))?;
+        unpack_runtime(state, archive, &cache_root)?;
+        update_launch(
+            state,
+            LaunchStage::VerifyingRuntime,
+            70,
+            "运行时展开完成，正在验证必要文件…".into(),
+        );
         if !is_installed_root(&root) {
             return Err("内置 Harness 运行时内容不完整".to_string());
         }
         fs::write(&marker, archive_stamp(archive)?)
             .map_err(|error| format!("写入 Harness 运行时版本标记失败：{error}"))?;
+    } else {
+        update_launch(
+            state,
+            LaunchStage::VerifyingRuntime,
+            70,
+            "已找到可复用的 Harness 运行时缓存…".into(),
+        );
     }
     Ok(RuntimePaths {
         launcher: root.join("lib").join("bin.js"),
         root,
         node,
     })
+}
+
+fn unpack_runtime(
+    state: &Arc<Mutex<HarnessProcess>>,
+    archive_path: &Path,
+    destination: &Path,
+) -> Result<(), String> {
+    let archive_size = archive_path
+        .metadata()
+        .map_err(|error| format!("读取内置 Harness 运行时大小失败：{error}"))?
+        .len();
+    let file = File::open(archive_path)
+        .map_err(|error| format!("打开内置 Harness 运行时失败：{error}"))?;
+    let bytes_read = Arc::new(AtomicU64::new(0));
+    let reader = ProgressReader {
+        inner: file,
+        bytes_read: Arc::clone(&bytes_read),
+    };
+    let mut archive = Archive::new(GzDecoder::new(reader));
+    let entries = archive
+        .entries()
+        .map_err(|error| format!("读取内置 Harness 运行时目录失败：{error}"))?;
+    let mut entry_count = 0_u64;
+    let mut previous_percent = u8::MAX;
+
+    update_extraction_progress(state, 0, 0);
+    for entry in entries {
+        let mut entry = entry.map_err(|error| format!("读取 Harness 运行时条目失败：{error}"))?;
+        let unpacked = entry
+            .unpack_in(destination)
+            .map_err(|error| format!("解压内置 Harness 运行时失败：{error}"))?;
+        if !unpacked {
+            return Err("内置 Harness 运行时包含越界路径".to_string());
+        }
+        entry_count += 1;
+
+        let percent = extraction_percent(bytes_read.load(Ordering::Relaxed), archive_size);
+        if percent != previous_percent {
+            previous_percent = percent;
+            update_extraction_progress(state, percent, entry_count);
+        }
+    }
+    update_extraction_progress(state, 100, entry_count);
+    Ok(())
+}
+
+fn extraction_percent(bytes_read: u64, archive_size: u64) -> u8 {
+    if archive_size == 0 {
+        return 0;
+    }
+    ((bytes_read.saturating_mul(100) / archive_size).min(99)) as u8
+}
+
+fn update_extraction_progress(state: &Arc<Mutex<HarnessProcess>>, percent: u8, entry_count: u64) {
+    const START: u16 = 12;
+    const END: u16 = 68;
+    let percent = percent.min(100);
+    let overall = START + ((END - START) * u16::from(percent) / 100);
+    let detail = if entry_count == 0 {
+        "首次启动：正在展开 Harness 运行时… 0%".to_string()
+    } else {
+        format!("首次启动：正在展开 Harness 运行时… {percent}% · 已处理 {entry_count} 个项目")
+    };
+    update_launch(state, LaunchStage::ExtractingRuntime, overall as u8, detail);
 }
 
 fn marker_matches(marker: &Path, archive: &Path) -> bool {
@@ -360,12 +520,22 @@ fn collect_stderr(mut stderr: impl Read, buffer: Arc<Mutex<String>>) {
     }
 }
 
-fn update_starting(state: &Arc<Mutex<HarnessProcess>>, detail: String) {
-    lock(state).snapshot = LaunchSnapshot {
-        phase: LaunchPhase::Starting,
-        detail,
-        url: None,
-    };
+fn mark_cold_start(state: &Arc<Mutex<HarnessProcess>>) {
+    lock(state).snapshot.cold_start = true;
+}
+
+fn update_launch(
+    state: &Arc<Mutex<HarnessProcess>>,
+    stage: LaunchStage,
+    progress: u8,
+    detail: String,
+) {
+    let mut process = lock(state);
+    process.snapshot.phase = LaunchPhase::Starting;
+    process.snapshot.stage = stage;
+    process.snapshot.progress = progress.min(99);
+    process.snapshot.detail = detail;
+    process.snapshot.url = None;
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -383,7 +553,7 @@ fn suppress_console_window(command: &mut Command) {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_ready_url;
+    use super::{extraction_percent, parse_ready_url};
 
     #[test]
     fn parses_loopback_readiness_line() {
@@ -395,5 +565,14 @@ mod tests {
     fn rejects_non_loopback_readiness_line() {
         assert!(parse_ready_url("dsh web: http://example.com:3080").is_none());
         assert!(parse_ready_url("noise").is_none());
+    }
+
+    #[test]
+    fn maps_archive_reads_to_bounded_extraction_progress() {
+        assert_eq!(extraction_percent(0, 100), 0);
+        assert_eq!(extraction_percent(42, 100), 42);
+        assert_eq!(extraction_percent(100, 100), 99);
+        assert_eq!(extraction_percent(200, 100), 99);
+        assert_eq!(extraction_percent(1, 0), 0);
     }
 }

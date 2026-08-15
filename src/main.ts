@@ -5,10 +5,30 @@ import {
   type Window as TauriWindow,
 } from "@tauri-apps/api/window";
 
+type LaunchStage =
+  | "locatingRuntime"
+  | "checkingRuntime"
+  | "extractingRuntime"
+  | "verifyingRuntime"
+  | "startingService"
+  | "waitingForService"
+  | "loadingWorkspace"
+  | "failed";
+
 interface LaunchStatus {
   phase: "starting" | "ready" | "failed";
+  stage: LaunchStage;
+  progress: number;
   detail: string;
   url: string | null;
+  coldStart: boolean;
+}
+
+interface StagePresentation {
+  step: number;
+  kicker: string;
+  title: string;
+  progressLabel: string;
 }
 
 interface HarnessThemeMessage {
@@ -20,7 +40,16 @@ const HARNESS_THEME_MESSAGE = "deepseek-harness:theme";
 const HARNESS_THEME_REQUEST = "deepseek-harness:theme-request";
 
 const title = document.querySelector<HTMLElement>("#launch-title");
+const kicker = document.querySelector<HTMLElement>("#launch-kicker");
 const detail = document.querySelector<HTMLElement>("#launch-detail");
+const coldStartNote = document.querySelector<HTMLElement>("#cold-start-note");
+const progressLabel = document.querySelector<HTMLElement>("#progress-label");
+const progressValue = document.querySelector<HTMLElement>("#progress-value");
+const progressTrack = document.querySelector<HTMLElement>("#progress-track");
+const progressFill = document.querySelector<HTMLElement>("#progress-fill");
+const launchSteps = Array.from(
+  document.querySelectorAll<HTMLElement>("[data-launch-step]"),
+);
 const error = document.querySelector<HTMLElement>("#launch-error");
 const failure = document.querySelector<HTMLElement>("#launch-failure");
 const stage = document.querySelector<HTMLElement>(".launch-stage");
@@ -37,6 +66,58 @@ const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
 let mountedHarnessUrl: string | null = null;
 let mountedHarnessOrigin: string | null = null;
 let harnessTheme: Theme | null = null;
+let renderedProgress = 3;
+
+const STAGE_PRESENTATION: Record<LaunchStage, StagePresentation> = {
+  locatingRuntime: {
+    step: 0,
+    kicker: "步骤 1/3 · 准备运行时",
+    title: "正在准备 Harness",
+    progressLabel: "定位内置运行时",
+  },
+  checkingRuntime: {
+    step: 0,
+    kicker: "步骤 1/3 · 准备运行时",
+    title: "正在检查运行环境",
+    progressLabel: "检查运行时缓存",
+  },
+  extractingRuntime: {
+    step: 0,
+    kicker: "步骤 1/3 · 首次启动准备",
+    title: "正在完成首次启动",
+    progressLabel: "展开 Harness 运行时",
+  },
+  verifyingRuntime: {
+    step: 0,
+    kicker: "步骤 1/3 · 准备运行时",
+    title: "正在验证 Harness",
+    progressLabel: "验证运行时完整性",
+  },
+  startingService: {
+    step: 1,
+    kicker: "步骤 2/3 · 启动本地服务",
+    title: "正在启动本地服务",
+    progressLabel: "创建 Harness 进程",
+  },
+  waitingForService: {
+    step: 1,
+    kicker: "步骤 2/3 · 启动本地服务",
+    title: "正在等待服务就绪",
+    progressLabel: "等待随机端口响应",
+  },
+  loadingWorkspace: {
+    step: 2,
+    kicker: "步骤 3/3 · 载入工作区",
+    title: "正在载入工作区",
+    progressLabel: "连接 Harness 界面",
+  },
+  failed: {
+    step: 0,
+    kicker: "启动未完成",
+    title: "Harness 启动失败",
+    progressLabel: "启动中断",
+  },
+};
 
 function resolveWindow(): TauriWindow | null {
   try {
@@ -119,9 +200,47 @@ async function runWindowAction(action: (window: TauriWindow) => Promise<void>): 
   }
 }
 
+function setProgress(value: number, allowDecrease = false): void {
+  const bounded = Math.max(0, Math.min(100, Math.round(value)));
+  renderedProgress = allowDecrease ? bounded : Math.max(renderedProgress, bounded);
+  if (progressValue) progressValue.textContent = `${renderedProgress}%`;
+  if (progressTrack) progressTrack.setAttribute("aria-valuenow", String(renderedProgress));
+  if (progressFill) {
+    progressFill.style.transform = `scaleX(${renderedProgress / 100})`;
+  }
+}
+
+function renderSteps(activeStep: number, complete = false): void {
+  launchSteps.forEach((element, index) => {
+    element.classList.toggle("is-active", !complete && index === activeStep);
+    element.classList.toggle("is-complete", complete || index < activeStep);
+  });
+}
+
+function renderLaunchStatus(status: LaunchStatus): void {
+  const presentation = STAGE_PRESENTATION[status.stage] ?? STAGE_PRESENTATION.locatingRuntime;
+  document.body.dataset.launchStage = status.stage;
+  if (kicker) kicker.textContent = presentation.kicker;
+  if (title) title.textContent = presentation.title;
+  if (detail) detail.textContent = status.detail;
+  if (progressLabel) progressLabel.textContent = presentation.progressLabel;
+  setProgress(status.progress);
+  renderSteps(presentation.step);
+
+  if (coldStartNote) {
+    coldStartNote.hidden = !status.coldStart;
+    coldStartNote.textContent = status.stage === "extractingRuntime"
+      ? "首次启动正在展开本地运行时，通常需要十几秒；请保持窗口开启，完成后再次启动会明显更快。"
+      : "首次运行时已经准备完成，接下来的启动步骤通常只需要几秒。";
+  }
+}
+
 function showFailure(message: string): void {
+  if (kicker) kicker.textContent = "启动未完成";
   if (title) title.textContent = "Harness 启动失败";
   if (detail) detail.textContent = "请检查路径、构建产物和 Node.js 环境。";
+  if (progressLabel) progressLabel.textContent = "启动中断";
+  if (coldStartNote) coldStartNote.hidden = true;
   if (error) error.textContent = message;
   if (failure) failure.hidden = false;
   if (stage) stage.setAttribute("aria-busy", "false");
@@ -147,6 +266,12 @@ function mountHarness(rawUrl: string): void {
 harnessFrame?.addEventListener("load", () => {
   if (harnessFrame.dataset.loading !== "true") return;
   delete harnessFrame.dataset.loading;
+  if (kicker) kicker.textContent = "步骤 3/3 · 工作区已就绪";
+  if (title) title.textContent = "DeepSeek Harness 已就绪";
+  if (detail) detail.textContent = "正在显示工作区…";
+  if (progressLabel) progressLabel.textContent = "启动完成";
+  setProgress(100);
+  renderSteps(2, true);
   if (stage) stage.setAttribute("aria-busy", "false");
   if (launchShell) launchShell.setAttribute("aria-hidden", "true");
   document.body.classList.add("is-harness-ready");
@@ -161,7 +286,7 @@ harnessFrame?.addEventListener("load", () => {
 async function pollLaunch(): Promise<void> {
   try {
     const status = await invoke<LaunchStatus>("launch_status");
-    if (detail) detail.textContent = status.detail;
+    renderLaunchStatus(status);
     if (status.phase === "failed") {
       showFailure(status.detail);
       return;

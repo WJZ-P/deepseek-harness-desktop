@@ -65,8 +65,35 @@
             </div>
 
             <div class="launch-copy">
-              <h1 id="launch-title">DeepSeek Harness 加载中</h1>
-              <p id="launch-detail">正在创建本地服务并装载插件…</p>
+              <p class="launch-kicker" id="launch-kicker">步骤 1/3 · 准备运行时</p>
+              <h1 id="launch-title">正在准备 Harness</h1>
+              <p id="launch-detail">正在定位内置 Harness 运行时…</p>
+              <p class="cold-start-note" id="cold-start-note" hidden>
+                首次启动需要展开本地运行时，通常需要十几秒；完成后再次启动会明显更快。
+              </p>
+            </div>
+
+            <div class="launch-progress" id="launch-progress">
+              <div class="progress-meta">
+                <span id="progress-label">启动准备</span>
+                <span id="progress-value">3%</span>
+              </div>
+              <div
+                class="progress-track"
+                id="progress-track"
+                role="progressbar"
+                aria-label="DeepSeek Harness 启动进度"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="3"
+              >
+                <span class="progress-fill" id="progress-fill"></span>
+              </div>
+              <ol class="launch-steps" aria-label="启动步骤">
+                <li class="is-active" data-launch-step="0"><span>准备运行时</span></li>
+                <li data-launch-step="1"><span>启动本地服务</span></li>
+                <li data-launch-step="2"><span>载入工作区</span></li>
+              </ol>
             </div>
 
             <div class="failure-panel" id="launch-failure" hidden>
