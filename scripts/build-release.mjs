@@ -239,6 +239,7 @@ async function materializeHarnessClosure() {
     rm(join(stagingRoot, "node_modules", ".modules.yaml"), { force: true }),
     rm(join(stagingRoot, "pnpm-lock.yaml"), { force: true }),
   ]);
+  await prunePackageManagerArtifacts(stagingRoot);
   await assertNoSymlinks(stagingRoot);
   console.log(`[release] Verified ${runtimeSeen.size} runtime packages.`);
 }
@@ -262,6 +263,23 @@ async function indexWorkspacePackages() {
     await visit(join(harnessRoot, directory));
   }
   return packages;
+}
+
+async function prunePackageManagerArtifacts(directory) {
+  const insideNodeModules = basename(directory) === "node_modules";
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (
+      insideNodeModules
+      && (entry.name === ".bin"
+        || entry.name === ".pnpm"
+        || entry.name === ".modules.yaml")
+    ) {
+      await rm(path, { recursive: true, force: true });
+      continue;
+    }
+    if (entry.isDirectory()) await prunePackageManagerArtifacts(path);
+  }
 }
 
 async function assertNoSymlinks(directory) {

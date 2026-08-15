@@ -18,8 +18,23 @@ if (!(Test-Path -LiteralPath $checksumPath -PathType Leaf)) {
     throw "Missing portable archive checksum: $checksumPath"
 }
 
+function Get-Sha256Hex {
+    param([string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = $algorithm.ComputeHash($stream)
+        return ([BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $algorithm.Dispose()
+        $stream.Dispose()
+    }
+}
+
 $expectedHash = ((Get-Content -LiteralPath $checksumPath -Raw).Trim() -split "\s+")[0]
-$actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+$actualHash = Get-Sha256Hex -Path $archive
 if (![string]::Equals($expectedHash, $actualHash, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Portable archive SHA-256 does not match $checksumPath"
 }
