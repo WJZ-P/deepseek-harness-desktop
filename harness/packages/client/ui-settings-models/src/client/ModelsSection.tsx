@@ -17,11 +17,13 @@ import type { ReactNode } from 'react'
 import type { IApiClient } from '@deepseek-ai/dsh-api-remotes/client'
 import { Button, IconPlusOutline16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-web-react'
+import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { CustomProviderCard } from './CustomProviderCard.tsx'
 import { deriveKeyRef, messageOf, protocolChoices, providerUsable } from './store.ts'
 import type { ModelsSettingsState, ModelsSettingsStore, ProviderRow } from './store.ts'
 import { ProviderEditor, type ProviderEditorProps } from './ProviderEditor.tsx'
 import type { en } from './locales.ts'
+import type { ModelFieldRenderer } from './model-fields.ts'
 import styles from './ModelsSection.module.css'
 
 /** Injected dependencies of {@link ModelsSection} (slot `inject`). */
@@ -40,7 +42,9 @@ export interface ModelsSectionInjected {
  * Props delivered by the slot outlet: the inject face spread flat (the
  * renderer erases the share boundary at the render call).
  */
-export type ModelsSectionProps = Partial<ModelsSectionInjected>
+export type ModelsSectionProps = Partial<
+  ModelsSectionInjected & PropsRenderSlots<'settings.models.model.fields'>
+>
 
 /** Provider identity shared by row actions and confirmation copy. */
 export interface ProviderIdentity {
@@ -66,16 +70,18 @@ interface ProviderEditorRenderProps extends Pick<
   'namespace' | 'api' | 't' | 'readOnly' | 'onClose'
 > {
   target: EditorTarget
+  renderModelFields: ModelFieldRenderer | undefined
 }
 
 /** Render an editor for either the setup posture or an expanded provider row. */
-function renderProviderEditor({ target, ...props }: ProviderEditorRenderProps): ReactNode {
+function renderProviderEditor({ target, renderModelFields, ...props }: ProviderEditorRenderProps): ReactNode {
   return (
     <ProviderEditor
       provider={target.provider}
       displayName={target.displayName}
       settingsPath={target.settingsPath}
       {...target.declared === true ? { declared: true } : {}}
+      {...renderModelFields === undefined ? {} : { renderModelFields }}
       {...props}
     />
   )
@@ -169,12 +175,18 @@ export function providerCopy(template: string, target: ProviderIdentity): string
  * @returns the section, or null while the shell has not injected yet.
  */
 export function ModelsSection(props: ModelsSectionProps): ReactNode {
-  const { controller, useSnapshot, api, t } = props
+  const { controller, useSnapshot, api, t, renderSlot } = props
   if (controller === undefined || useSnapshot === undefined || api === undefined || t === undefined) return null
-  return <Loaded injected={{ controller, useSnapshot, api, t }} />
+  const renderModelFields: ModelFieldRenderer | undefined = renderSlot === undefined
+    ? undefined
+    : owner => renderSlot('settings.models.model.fields', owner)
+  return <Loaded injected={{ controller, useSnapshot, api, t }} renderModelFields={renderModelFields} />
 }
 
-function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
+function Loaded({ injected, renderModelFields }: {
+  injected: ModelsSectionInjected
+  renderModelFields: ModelFieldRenderer | undefined
+}): ReactNode {
   const { controller, api, t } = injected
   const state = injected.useSnapshot(snapshot => snapshot)
   const [editing, setEditing] = useState<EditorTarget | undefined>(undefined)
@@ -300,6 +312,7 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
                   api,
                   t,
                   readOnly: !state.writable,
+                  renderModelFields,
                   onClose: (changed) => { closeSetup(changed, target) },
                 })}
               </li>
@@ -384,6 +397,7 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
                   api,
                   t,
                   readOnly: !state.writable,
+                  renderModelFields,
                   onClose: (changed) => { closeEditor(changed, target) },
                 })
                 : null}
@@ -423,6 +437,7 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
                 api={api}
                 t={t}
                 readOnly={!state.writable}
+                {...renderModelFields === undefined ? {} : { renderModelFields }}
                 onClose={(changed) => { closeEditor(changed, addTarget) }}
               />
             </div>
@@ -438,6 +453,7 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
                   api={api}
                   t={t}
                   readOnly={!state.writable}
+                  {...renderModelFields === undefined ? {} : { renderModelFields }}
                   onClose={(changed) => {
                     setDeclaring(false)
                     if (changed) void controller.load()

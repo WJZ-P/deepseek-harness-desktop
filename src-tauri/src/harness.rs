@@ -5,6 +5,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use serde::Serialize;
@@ -23,6 +24,7 @@ struct RuntimePaths {
     root: PathBuf,
     launcher: PathBuf,
     node: PathBuf,
+    bundled_plugins: Vec<(&'static str, PathBuf)>,
 }
 
 #[derive(Clone, Serialize)]
@@ -57,6 +59,7 @@ enum LaunchStage {
 
 pub struct HarnessProcess {
     child: Option<Child>,
+    overlay: Option<PathBuf>,
     snapshot: LaunchSnapshot,
 }
 
@@ -64,6 +67,7 @@ impl HarnessProcess {
     pub fn new() -> Self {
         Self {
             child: None,
+            overlay: None,
             snapshot: LaunchSnapshot {
                 phase: LaunchPhase::Starting,
                 stage: LaunchStage::LocatingRuntime,
@@ -101,27 +105,29 @@ impl HarnessProcess {
     }
 
     fn stop_child(&mut self) {
-        let Some(mut child) = self.child.take() else {
-            return;
-        };
+        if let Some(mut child) = self.child.take() {
+            #[cfg(windows)]
+            {
+                let mut terminator = Command::new("taskkill");
+                terminator
+                    .args(["/PID", &child.id().to_string(), "/T", "/F"])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                suppress_console_window(&mut terminator);
+                let _ = terminator.status();
+            }
 
-        #[cfg(windows)]
-        {
-            let mut terminator = Command::new("taskkill");
-            terminator
-                .args(["/PID", &child.id().to_string(), "/T", "/F"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-            suppress_console_window(&mut terminator);
-            let _ = terminator.status();
+            #[cfg(not(windows))]
+            {
+                let _ = child.kill();
+            }
+
+            let _ = child.wait();
         }
 
-        #[cfg(not(windows))]
-        {
-            let _ = child.kill();
+        if let Some(overlay) = self.overlay.take() {
+            let _ = std::fs::remove_file(overlay);
         }
-
-        let _ = child.wait();
     }
 }
 
@@ -133,6 +139,8 @@ impl Drop for HarnessProcess {
 
 fn start_harness(state: &Arc<Mutex<HarnessProcess>>, window: &WebviewWindow) -> Result<(), String> {
     let runtime = resolve_runtime(state, window)?;
+    let overlay = create_desktop_overlay(&runtime.bundled_plugins)?;
+    lock(state).overlay = Some(overlay.clone());
 
     update_launch(
         state,
@@ -143,7 +151,9 @@ fn start_harness(state: &Arc<Mutex<HarnessProcess>>, window: &WebviewWindow) -> 
     let mut command = Command::new(&runtime.node);
     command
         .arg(&runtime.launcher)
-        .args(["web", "--host", "127.0.0.1", "--port", "0"])
+        .args(["web", "--patch"])
+        .arg(&overlay)
+        .args(["--host", "127.0.0.1", "--port", "0"])
         .current_dir(&runtime.root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -305,10 +315,21 @@ fn source_runtime(path: PathBuf) -> Result<RuntimePaths, String> {
     let node = env::var_os("DSH_DESKTOP_NODE")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("node"));
+    let repository_root = root
+        .parent()
+        .ok_or_else(|| "桌面项目插件目录位置缺失".to_string())?;
+    let desktop_plugins_root = env::var_os("DSH_DESKTOP_PLUGINS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repository_root.join("desktop-plugins"));
+    let shared_plugins_root = env::var_os("DSH_PLUGINS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repository_root.join("plugins"));
+    let bundled_plugins = checked_plugins(&desktop_plugins_root, &shared_plugins_root)?;
     Ok(RuntimePaths {
         launcher: root.join("apps").join("cli").join("lib").join("bin.js"),
         root,
         node,
+        bundled_plugins,
     })
 }
 
@@ -321,11 +342,71 @@ fn bundled_runtime(path: PathBuf, node: PathBuf) -> Result<RuntimePaths, String>
     }
     let root = dunce::canonicalize(&path)
         .map_err(|error| format!("解析便携 Harness 运行时路径失败：{error}"))?;
+    let bundled_plugins = checked_plugins(&root.join("desktop-plugins"), &root.join("plugins"))?;
     Ok(RuntimePaths {
         launcher: root.join("lib").join("bin.js"),
         root,
         node,
+        bundled_plugins,
     })
+}
+
+fn checked_plugin(path: PathBuf) -> Result<PathBuf, String> {
+    if !has_content(&path) {
+        return Err(format!(
+            "插件构建产物不完整：{}\n请先运行 pnpm run plugin:build。",
+            path.display()
+        ));
+    }
+    dunce::canonicalize(&path).map_err(|error| format!("解析插件路径失败：{error}"))
+}
+
+fn checked_plugins(
+    desktop_root: &Path,
+    shared_root: &Path,
+) -> Result<Vec<(&'static str, PathBuf)>, String> {
+    [
+        ("desktop-bridge", desktop_root.join("desktop-bridge")),
+        ("dsh-attachments", shared_root.join("dsh-attachments")),
+        (
+            "dsh-model-capabilities",
+            shared_root.join("dsh-model-capabilities"),
+        ),
+    ]
+    .into_iter()
+    .map(|(id, directory)| {
+        checked_plugin(directory.join("lib").join("index.mjs")).map(|path| (id, path))
+    })
+    .collect()
+}
+
+fn desktop_overlay_content(plugins: &[(&str, PathBuf)]) -> Result<String, String> {
+    let mut output = String::from(
+        "# Generated by DeepSeek Harness Desktop; removed when the app exits.\n- insert:\n",
+    );
+    for (id, plugin) in plugins {
+        let url = Url::from_file_path(plugin)
+            .map_err(|_| format!("桌面集成插件路径不是有效的 file URL：{}", plugin.display()))?;
+        // A single-quoted YAML scalar treats every character literally;
+        // doubling a quote is the only escape it admits.
+        let plugin_url = url.as_str().replace('\'', "''");
+        output.push_str(&format!("    - id: {id}\n      name: '{plugin_url}'\n"));
+    }
+    Ok(output)
+}
+
+fn create_desktop_overlay(plugins: &[(&str, PathBuf)]) -> Result<PathBuf, String> {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("读取系统时间失败：{error}"))?
+        .as_nanos();
+    let path = env::temp_dir().join(format!(
+        "deepseek-harness-desktop-{}-{nonce}.patch.yml",
+        std::process::id()
+    ));
+    std::fs::write(&path, desktop_overlay_content(plugins)?)
+        .map_err(|error| format!("写入桌面插件启动覆盖失败：{error}"))?;
+    Ok(path)
 }
 
 fn is_source_root(path: &Path) -> bool {
@@ -404,7 +485,9 @@ fn suppress_console_window(command: &mut Command) {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_ready_url;
+    use std::path::Path;
+
+    use super::{desktop_overlay_content, parse_ready_url};
 
     #[test]
     fn parses_loopback_readiness_line() {
@@ -416,5 +499,28 @@ mod tests {
     fn rejects_non_loopback_readiness_line() {
         assert!(parse_ready_url("dsh web: http://example.com:3080").is_none());
         assert!(parse_ready_url("noise").is_none());
+    }
+
+    #[test]
+    fn desktop_overlay_mounts_each_plugin_by_file_url() {
+        let plugins = [
+            (
+                "desktop-bridge",
+                Path::new("C:/Desktop Plugin/bridge/index.mjs").to_path_buf(),
+            ),
+            (
+                "dsh-attachments",
+                Path::new("C:/Desktop Plugin/attachments/index.mjs").to_path_buf(),
+            ),
+            (
+                "dsh-model-capabilities",
+                Path::new("C:/Desktop Plugin/model-capabilities/index.mjs").to_path_buf(),
+            ),
+        ];
+        let overlay = desktop_overlay_content(&plugins).expect("overlay");
+        assert!(overlay.contains("id: desktop-bridge"));
+        assert!(overlay.contains("id: dsh-attachments"));
+        assert!(overlay.contains("id: dsh-model-capabilities"));
+        assert!(overlay.contains("file:///C:/Desktop%20Plugin/bridge/index.mjs"));
     }
 }

@@ -131,7 +131,8 @@ it('accepts pasted images into the composer rail in order and removes them', asy
   if (remove.length !== 2) throw new Error('remove buttons missing')
   for (const button of remove) fireEvent.click(button)
   await waitFor(() => {
-    expect(document.querySelector('[role="group"][aria-label="Pending images"]')).toBeNull()
+    const emptyRail = document.querySelector('[role="group"][aria-label="Pending images"]')
+    expect(emptyRail === null || emptyRail.closest('[hidden]') !== null).toBe(true)
   })
 
   // An unsupported file announces a transient toast (the inline strip is
@@ -165,9 +166,9 @@ it('accepts a whole-page drop under the limits-labeled overlay and refuses an ov
   const dataTransfer = { types: ['Files'], files: [image], dropEffect: 'none' }
   fireEvent.dragEnter(document.body, { dataTransfer })
   const overlay = await screen.findByRole('status')
-  expect(overlay.textContent).toContain('Drag images here to add them')
+  expect(overlay.textContent).toContain('Drag here to add')
   await waitFor(() => {
-    expect(overlay.textContent).toContain('Up to 20 images, 5MB each')
+    expect(overlay.textContent).toContain('Images: up to 20, 5MB each')
   })
 
   // Dropping on the transcript area (not the composer card) lands in the rail.

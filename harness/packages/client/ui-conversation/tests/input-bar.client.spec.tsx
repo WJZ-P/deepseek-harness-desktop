@@ -84,6 +84,7 @@ interface BenchOptions {
   overlay?: React.ReactNode
   leftItems?: React.ReactNode
   rightItems?: React.ReactNode
+  attachmentItems?: React.ReactNode
   attachments?: readonly ComposerAttachment[]
   addImages?: (files: readonly File[]) => string | null
   commandMenuOpen?: boolean
@@ -189,6 +190,7 @@ function bench(over?: BenchOptions) {
     ...(over?.overlay !== undefined ? { overlay: over.overlay } : {}),
     ...(over?.leftItems !== undefined ? { leftItems: over.leftItems } : {}),
     ...(over?.rightItems !== undefined ? { rightItems: over.rightItems } : {}),
+    ...(over?.attachmentItems !== undefined ? { attachmentItems: over.attachmentItems } : {}),
   }
   const view = render(<InputBar {...props} />)
   const textarea = view.container.querySelector('textarea')!
@@ -205,6 +207,12 @@ function bench(over?: BenchOptions) {
 }
 
 describe('image draft rail', () => {
+  it('lets an empty attachment plugin mount without changing composer layout', () => {
+    const { view } = bench({ attachmentItems: <></> })
+    const rail = view.container.querySelector('[role="group"][aria-label="待发送图片"]')
+    expect(rail?.parentElement?.parentElement?.hidden).toBe(true)
+  })
+
   it('collects clipboard files while preserving text from a mixed paste', () => {
     const addImages = vi.fn(() => null)
     const { textarea, shell } = bench({ addImages })
@@ -229,7 +237,7 @@ describe('image draft rail', () => {
     const dataTransfer = { types: ['Files'], files: [image], dropEffect: 'none' }
     // The drag never touches the composer card: the listeners are page-wide.
     expect(fireEvent.dragEnter(document.body, { dataTransfer })).toBe(false)
-    expect(view.getByRole('status').textContent).toContain('图片拖动到此处即可添加')
+    expect(view.getByRole('status').textContent).toContain('拖动到此处即可添加')
     expect(fireEvent.dragOver(document.body, { dataTransfer })).toBe(false)
     expect(dataTransfer.dropEffect).toBe('copy')
     expect(fireEvent.drop(document.body, { dataTransfer })).toBe(false)
@@ -331,7 +339,7 @@ describe('image draft rail', () => {
       },
     })
     fireEvent.dragEnter(document.body, { dataTransfer: { types: ['Files'], files: [], dropEffect: 'none' } })
-    expect(view.getByRole('status').textContent).toContain('最多 20 张，每张 5MB')
+    expect(view.getByRole('status').textContent).toContain('图片最多 20 张，每张 5MB')
   })
 
   it('announces server attachment rejections as product copy, other codes as developer text', () => {

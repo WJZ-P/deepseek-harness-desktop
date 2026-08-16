@@ -1,7 +1,7 @@
 lockfileVersion: '9.0'
 
 settings:
-  autoInstallPeers: true
+  autoInstallPeers: false
   excludeLinksFromLockfile: false
 
 importers:
@@ -24,6 +24,18 @@ importers:
       vite:
         specifier: ^6.0.3
         version: 6.4.3
+
+  plugins/dsh-attachments:
+    devDependencies:
+      esbuild:
+        specifier: ^0.25.12
+        version: 0.25.12
+
+  plugins/dsh-model-capabilities:
+    devDependencies:
+      esbuild:
+        specifier: ^0.25.12
+        version: 0.25.12
 
 packages:
 

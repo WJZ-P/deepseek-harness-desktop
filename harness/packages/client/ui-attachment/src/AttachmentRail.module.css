@@ -9,6 +9,7 @@
 
 .rail {
   display: flex;
+  align-items: center;
   gap: 10px;
   overflow-x: auto;
   overflow-y: hidden;

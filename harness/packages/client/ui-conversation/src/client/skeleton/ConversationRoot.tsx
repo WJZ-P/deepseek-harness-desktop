@@ -149,6 +149,7 @@ export function ConversationRoot({
         ? { blocked: composerBlock, placeholder: composerBlock.reason }
         : hero ? { placeholder: t('placeholder.hero') } : {}),
     overlay: renderSlot('conversation.input.overlay', {}),
+    attachmentItems: zone === undefined ? null : renderSlot('conversation.input.attachments', zone),
     leftItems: zone === undefined ? null : renderSlot('conversation.input.left', zone),
     rightItems: zone === undefined ? null : renderSlot('conversation.input.right', zone),
     // Stats band under the card, inside the bar's width column so both

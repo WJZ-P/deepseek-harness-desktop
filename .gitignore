@@ -2,7 +2,10 @@ node_modules/
 dist/
 dist-ssr/
 release-runtime/
+desktop-plugins/*/lib/
+plugins/*/lib/
 src-tauri/target/
+src-tauri/target-link-fix/
 .tmp-*/
 *.local
 *.log

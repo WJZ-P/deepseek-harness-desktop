@@ -160,6 +160,16 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'conversation.input.dock': { kind: 'list'; scope: 'session'; owner: InputZone }
     /**
+     * Additional draft-attachment cards inside the composer's native image
+     * rail. Entries share its horizontal scroll surface and are intended for
+     * non-image attachment plugins; the built-in image owner remains in
+     * charge of image previews, limits, and lightbox behavior. A contribution
+     * marks the root of each real card group with `data-attachment-content`;
+     * the rail observes those markers rather than registration count, so an
+     * empty slot wrapper reserves no composer space.
+     */
+    'conversation.input.attachments': { kind: 'list'; scope: 'session'; owner: InputZone }
+    /**
      * The band under the composer card, inside the bar's width column — the
      * seat for an ambient readout about the conversation (the shipped stats
      * line lives here). Same {@link InputZone} owner share as the other
@@ -479,6 +489,8 @@ export interface ComposerBarOwnerProps {
   placeholder?: string
   /** Optional content rendered above the textarea. */
   accessory?: ReactNode
+  /** input.attachments slot entries rendered in the native attachment rail. */
+  attachmentItems?: ReactNode
   /** Floating overlay anchor content (menu / popup shell entries), rendered inside the card. */
   overlay?: ReactNode
   /** input.left slot entries (tool row, beside the resident chrome). */
@@ -571,7 +583,7 @@ export type ConversationSlotProps =
     | 'conversation.session' | 'conversation.session.header'
     | 'conversation.composer' | 'conversation.composer.bar'
     | 'conversation.input.overlay'
-    | 'conversation.input.dock' | 'conversation.composer.dock'
+    | 'conversation.input.dock' | 'conversation.input.attachments' | 'conversation.composer.dock'
     | 'conversation.input.left' | 'conversation.input.right'
     | 'conversation.hero.workspace'
     | 'conversation.hero.agentPreset'

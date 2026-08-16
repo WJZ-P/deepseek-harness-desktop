@@ -22,6 +22,7 @@ import { formatCapacity, parseCapacity } from './DeepSeekModelsEditor.tsx'
 import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
 import { messageOf } from './store.ts'
 import type { en } from './locales.ts'
+import type { ModelFieldRenderer } from './model-fields.ts'
 import styles from './ModelsSection.module.css'
 
 /**
@@ -87,6 +88,8 @@ export interface ModelListEditorProps {
   t: (key: keyof typeof en) => string
   /** Disable every control (read-only deployment or a pending write). */
   disabled: boolean
+  /** Render fields contributed through the Models section's child slot. */
+  renderModelFields?: ModelFieldRenderer
 }
 
 /** Disclosure chevron; rotates to point down while its row is open. */
@@ -210,7 +213,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
     })
   }
 
-  const patch = (index: number, next: Record<string, string | number | undefined>): void => {
+  const patch = (index: number, next: Readonly<Record<string, unknown>>): void => {
     onChange(models.map((model, at) => {
       if (at !== index) return model
       // Rebuilt rather than spread over: an emptied optional field has to leave
@@ -417,6 +420,12 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
                     onChange={(event) => { editCapacity(index, 'maxTokens', event.target.value) }}
                   />
                 </label>
+                {props.renderModelFields?.({
+                  model,
+                  index,
+                  disabled,
+                  update: (next) => { patch(index, next) },
+                })}
               </div>
             )
             : null}

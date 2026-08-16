@@ -21,7 +21,8 @@
         "minHeight": 620,
         "center": true,
         "visible": true,
-        "decorations": false
+        "decorations": false,
+        "dragDropEnabled": false
       }
     ],
     "security": {

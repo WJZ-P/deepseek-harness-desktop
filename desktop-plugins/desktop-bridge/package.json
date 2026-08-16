@@ -1,0 +1,13 @@
+{
+  "name": "@deepseek-ai/dsh-desktop-bridge",
+  "version": "1.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.mjs",
+  "exports": {
+    ".": "./lib/index.mjs"
+  },
+  "files": [
+    "lib"
+  ]
+}

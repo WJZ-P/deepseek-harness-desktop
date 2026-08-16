@@ -15,12 +15,21 @@ import {
 import { constants as fsConstants, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const desktopRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const harnessRoot = join(desktopRoot, "harness");
 const releaseRuntime = join(desktopRoot, "release-runtime");
 const stagingRoot = join(releaseRuntime, "harness");
+const bundledPlugins = [
+  { id: "desktop-bridge", root: "desktop-plugins", directory: "desktop-bridge" },
+  { id: "dsh-attachments", root: "plugins", directory: "dsh-attachments" },
+  { id: "dsh-model-capabilities", root: "plugins", directory: "dsh-model-capabilities" },
+].map((plugin) => ({
+  ...plugin,
+  source: join(desktopRoot, plugin.root, plugin.directory),
+  staged: join(stagingRoot, plugin.root, plugin.directory),
+}));
 const outputRoot = join(desktopRoot, "dist");
 const platformNames = { win32: "windows", linux: "linux", darwin: "macos" };
 const architectureNames = { x64: "x64", arm64: "arm64" };
@@ -124,9 +133,30 @@ async function deployCli() {
     "--config.node-linker=hoisted",
     "--config.inject-workspace-packages=true",
     "--config.auto-install-peers=true",
+    "--config.force-legacy-deploy=true",
     stagingRoot,
   ]);
   await run(invocation.command, invocation.args);
+}
+
+async function stageBundledPlugins() {
+  for (const plugin of bundledPlugins) {
+    await mkdir(join(plugin.staged, "lib"), { recursive: true });
+    await copyFile(join(plugin.source, "package.json"), join(plugin.staged, "package.json"));
+    await cp(join(plugin.source, "lib"), join(plugin.staged, "lib"), {
+      recursive: true,
+      dereference: true,
+    });
+    for (const filename of ["cordis.patch.yml", "README.md", "LICENSE"]) {
+      const source = join(plugin.source, filename);
+      try {
+        await copyFile(source, join(plugin.staged, filename));
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+    }
+    console.log(`[release] Staged bundled plugin: ${plugin.staged}`);
+  }
 }
 
 function resolvePackageManifest(anchor, packageName) {
@@ -365,10 +395,29 @@ async function terminateChild(child) {
 }
 
 async function smokeRuntime() {
+  const smokeOverlay = join(releaseRuntime, "desktop-smoke.patch.yml");
+  const overlayRows = bundledPlugins.map((plugin) => {
+    const pluginUrl = pathToFileURL(join(plugin.staged, "lib", "index.mjs"))
+      .href.replaceAll("'", "''");
+    return `    - id: ${plugin.id}\n      name: '${pluginUrl}'`;
+  }).join("\n");
+  await writeFile(
+    smokeOverlay,
+    `- insert:\n${overlayRows}\n`,
+  );
   const result = await new Promise((resolvePromise, reject) => {
     const child = spawn(
       nodePath,
-      [join(stagingRoot, "lib", "bin.js"), "web", "--host", "127.0.0.1", "--port", "0"],
+      [
+        join(stagingRoot, "lib", "bin.js"),
+        "web",
+        "--patch",
+        smokeOverlay,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "0",
+      ],
       {
         cwd: stagingRoot,
         env: {
@@ -405,6 +454,28 @@ async function smokeRuntime() {
         if (!body.includes("data-dsh-desktop-theme-bridge")) {
           throw new Error("Harness smoke response is missing the desktop theme bridge.");
         }
+        if (!body.includes("dsh-attachments")) {
+          throw new Error("Harness smoke manifest is missing the desktop attachments bundle.");
+        }
+        if (!body.includes("dsh-model-capabilities")) {
+          throw new Error("Harness smoke manifest is missing the model capabilities bundle.");
+        }
+        const clientResponse = await fetch(
+          `${ready[1]}/desktop-plugin-bundles/dsh-attachments/client.js`,
+        );
+        const clientBody = await clientResponse.text();
+        if (clientResponse.status !== 200
+          || !clientBody.includes("dsh-attachments")) {
+          throw new Error(`Desktop attachments bundle returned HTTP ${clientResponse.status}.`);
+        }
+        const capabilitiesResponse = await fetch(
+          `${ready[1]}/desktop-plugin-bundles/dsh-model-capabilities/client.js`,
+        );
+        const capabilitiesBody = await capabilitiesResponse.text();
+        if (capabilitiesResponse.status !== 200
+          || !capabilitiesBody.includes("dsh-model-capabilities")) {
+          throw new Error(`Model capabilities bundle returned HTTP ${capabilitiesResponse.status}.`);
+        }
         await finish(undefined, { url: ready[1], bytes: body.length });
       } catch (error) {
         await finish(error);
@@ -435,7 +506,10 @@ async function smokeRuntime() {
       );
     }, 45_000);
   });
-  await rm(join(releaseRuntime, "smoke-home"), { recursive: true, force: true });
+  await Promise.all([
+    rm(join(releaseRuntime, "smoke-home"), { recursive: true, force: true }),
+    rm(smokeOverlay, { force: true }),
+  ]);
   console.log(`[release] Harness smoke passed at ${result.url} (${result.bytes} bytes).`);
 }
 
@@ -593,6 +667,7 @@ async function hashFile(path) {
 
 await prepareHarness();
 await deployCli();
+await stageBundledPlugins();
 await materializeHarnessClosure();
 await pruneIncompatibleNativeVariants();
 await copyNodeRuntime();

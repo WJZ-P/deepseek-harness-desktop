@@ -6,8 +6,9 @@ import Schema from '@deepseek-ai/schemastery'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-web-react'
 import type { RpcResponse, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import { ModelsSection, providerCopy } from '../src/client/ModelsSection.tsx'
-import type { ModelsSectionInjected } from '../src/client/ModelsSection.tsx'
+import type { ModelsSectionInjected, ModelsSectionProps } from '../src/client/ModelsSection.tsx'
 import { CustomProviderCard } from '../src/client/CustomProviderCard.tsx'
+import type { ModelFieldOwnerProps, ModelFieldRenderer } from '../src/client/model-fields.ts'
 import { formatCapacity, parseCapacity } from '../src/client/DeepSeekModelsEditor.tsx'
 import { ModelsSettingsStore, deriveKeyRef, protocolChoices } from '../src/client/store.ts'
 import { en } from '../src/client/locales.ts'
@@ -137,7 +138,10 @@ function firstMutate(mutate: ReturnType<typeof vi.fn>): MutateCall {
   return call
 }
 
-async function mountSection(options: Parameters<typeof scriptedFace>[0] = {}) {
+async function mountSection(
+  options: Parameters<typeof scriptedFace>[0] = {},
+  renderModelFields?: ModelFieldRenderer,
+) {
   const scripted = scriptedFace(options)
   const controller = new ModelsSettingsStore(scripted.face as unknown as WireFace)
   await controller.load()
@@ -147,7 +151,10 @@ async function mountSection(options: Parameters<typeof scriptedFace>[0] = {}) {
     api: scripted.face as never,
     t,
   }
-  render(<ModelsSection {...injected} />)
+  const renderSlot: ModelsSectionProps['renderSlot'] = renderModelFields === undefined
+    ? undefined
+    : ((_key: string, owner: ModelFieldOwnerProps) => renderModelFields(owner)) as never
+  render(<ModelsSection {...injected} {...renderSlot === undefined ? {} : { renderSlot }} />)
   return { ...scripted, controller }
 }
 
@@ -192,6 +199,34 @@ describe('protocolChoices', () => {
 })
 
 describe('model list editing', () => {
+  it('delegates additive row fields and merges their model patch', async () => {
+    const renderFields = vi.fn<ModelFieldRenderer>(owner => (
+      <button type="button" onClick={() => { owner.update({ input: ['text', 'image'] }) }}>
+        Enable images
+      </button>
+    ))
+    const { mutate } = await mountSection({
+      providers: { openai: { baseURL: 'https://proxy.example/v1', models: [{ id: 'vision' }] } },
+    }, renderFields)
+    openEditor('openai')
+
+    expect(screen.queryByText('Enable images')).toBeNull()
+    expandModel(1)
+    expect(renderFields).toHaveBeenCalled()
+    expect(renderFields.mock.lastCall?.[0]).toMatchObject({
+      model: { id: 'vision' },
+      index: 0,
+      disabled: false,
+    })
+    fireEvent.click(screen.getByText('Enable images'))
+    fireEvent.click(screen.getByText(en.apply))
+
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops[0]?.value).toEqual([{
+      id: 'vision', input: ['text', 'image'],
+    }])
+  })
+
   it('adds, edits, and removes rows without storing emptied optional fields', async () => {
     const { mutate } = await mountSection()
     openEditor('openai')

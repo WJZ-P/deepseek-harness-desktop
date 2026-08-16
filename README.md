@@ -65,6 +65,7 @@ Windows 便携版无需另外安装 Node.js，也无需准备 Harness 源码目�
 | 📦 **真正便携** | 各平台发行包内置匹配平台的 Node.js 与完整生产运行时，用户不需要手动配置开发环境。 |
 | 🐋 **启动有反馈** | 启动页按“读取便携运行时 → 启动本地服务 → 载入工作区”展示真实阶段，不用再等待 AppData 解压。 |
 | 🎨 **原生体验** | 32px 自绘标题栏、深浅主题同步、优雅的鲸鱼加载动画，并抑制后台控制台闪窗。 |
+| 🖼️ **拖入附件** | 图片继续走 Harness 原生预览与历史画廊；其他文件由独立、可安装的 DSH 插件提供拖放、输入卡片、历史卡片与下载。 |
 | 🔍 **源码完整** | `harness/` 由本仓库直接跟踪，不是 Git 子模块；普通 clone 就能获得完整源码。 |
 
 一句话概括：**Tauri 负责把窗口做得轻巧漂亮，Harness 继续负责真正的工作。** ₍^. .^₎⟆
@@ -110,8 +111,10 @@ Vite 开发地址固定为 `http://localhost:821`，HMR 使用端口 `822`。Har
 
 ```text
 deepseek-harness-desktop/
+├─ desktop-plugins/ # 仅由桌面封装携带的 Cordis 集成
 ├─ docs/assets/     # README Banner 等项目图片
 ├─ harness/         # 本仓库直接跟踪的完整 DeepSeek Harness 源码
+├─ plugins/         # 可通过 dsh plugin 安装的标准 DSH bundle（默认面向原生 DSH）
 ├─ scripts/         # Harness 准备、发行构建与验证脚本
 ├─ src/             # 桌面外壳、自绘标题栏与启动/错误页
 ├─ src-tauri/       # Rust 窗口、便携运行时定位与进程监督器
@@ -121,6 +124,16 @@ deepseek-harness-desktop/
 
 上游地址、导入提交与许可证记录见 [`HARNESS_UPSTREAM.md`](HARNESS_UPSTREAM.md)。
 
+### 🧩 低侵入插件边界
+
+桌面专属桥与桌面预装的通用插件都没有继续散落进 `harness/` 业务包，而是通过启动时的 Cordis `--patch` 覆盖层装入。所有可复用插件遵循 [`plugins/README.md`](plugins/README.md) 中的官方 bundle 约定，设计时默认使用者运行的是原生 DSH：
+
+- `desktop-bridge`：在 Host 返回 HTML 时注入深浅主题同步桥，并把 Desktop 以 `file://` 挂载的标准插件映射回同一份 `dsh.client` 启动图；公开插件无需携带 Tauri 分支，也不再改写生成后的 `index.html`；
+- [`dsh-attachments`](plugins/dsh-attachments/)：位于 `plugins/` 的标准 DSH bundle，同时声明 `dsh.bundle` 与 Web `dsh.client`，既可由桌面封装携带，也可通过 `dsh plugin --profile web add` 安装到原生 DSH；它沿用 Harness 已有的图片拖放/粘贴链路，只接管普通文件与文件夹。拖入一个文件夹只生成一个附件卡片，并以完整目录树的形式复制到工作区，不再把其中每个文件逐项塞进输入栏；同时提供流式上传/下载、输入区附件卡片与持久历史卡片。插件本身不设置文件数量或单文件字节上限，也不额外占用输入栏按钮；
+- [`dsh-model-capabilities`](plugins/dsh-model-capabilities/)：同样位于 `plugins/` 的标准 DSH bundle；在新增或编辑 pi-ai 模型时提供 Input Modalities 选择，可明确声明继承默认值、文本、图片或文本加图片，并可独立安装到原生 DSH；
+- 普通文件会保存到 Harness 数据目录，并在消息真正进入模型步骤前复制到工作区 `.deepseek-harness/attachments/`，模型拿到的是可直接读取的工作区路径；
+- `harness/` 内只保留通用的 **输入附件栏 slot** 与 **模型行字段 slot**；浏览器 bundle 直接使用 Harness 官方 `dsh.client` 发现链路，具体 UI、存储和消息关联逻辑留在上游树外的 `plugins/` 与 `desktop-plugins/`。以后同步上游时，冲突面依旧很小喵～
+
 ## 🧭 架构
 
 ```mermaid
@@ -128,7 +141,9 @@ flowchart LR
   A["Tauri desktop process"] -->|"spawn and supervise"| B["Harness CLI / lib/bin.js"]
   B --> C["Cordis web profile"]
   C --> D["Host API and session log"]
-  C --> E["Injected client plugin graph"]
+  C --> E["Harness client plugin graph"]
+  H["Desktop Cordis plugins"] -->|"runtime --patch"| C
+  H -->|"standard dsh.client bundle"| E
   A -->|"mount after readiness"| F["Persistent desktop shell"]
   E --> G["Harness iframe"]
   F --> G
@@ -136,7 +151,7 @@ flowchart LR
 ```
 
 - 开发模式直接从 `harness/apps/cli/lib/bin.js` 启动。
-- 发行模式直接从应用资源目录的 `runtime/harness/` 执行 `lib/bin.js web --host 127.0.0.1 --port 0`，不创建 AppData 运行时副本。
+- 发行模式直接从应用资源目录的 `runtime/harness/` 执行 `lib/bin.js web --patch <desktop-overlay> --host 127.0.0.1 --port 0`，不创建 AppData 运行时副本。
 - Rust 进程读取 `dsh web:` 就绪行，仅接受 `127.0.0.1` 随机端口，再交给桌面 WebView 加载。
 - WebView 继续复用现有 Host fence、`/api` 传输和两条 WebSocket 下行流。
 - 关闭窗口或应用时，桌面层会回收整个 Node 子进程树。
@@ -150,6 +165,7 @@ flowchart LR
 | --- | --- |
 | `pnpm tauri dev` | 启动 Harness 与 Tauri 开发环境 |
 | `pnpm run harness:prepare` | 校验、安装并按需构建 Harness |
+| `pnpm run plugin:test` | 校验标准 bundle 清单，并构建、测试桌面桥及全部通用插件 |
 | `pnpm run check` | 校验 Harness 源码完整性、TypeScript 与 Rust |
 | `pnpm run build:frontend` | 只构建桌面启动外壳，不生成原生发行包 |
 | `pnpm run build` | 构建当前平台的完整自包含发行包 |
@@ -177,7 +193,7 @@ pnpm run verify:release-artifacts
 
 每个资产都会附带独立的 `.sha256` 文件。Linux 与 macOS 的 Node/Harness 目录作为 Tauri resource 放入原生包；Windows 则使用无需安装的 portable ZIP，并从 EXE 相邻目录直接启动运行时。
 
-Windows 的完整便携版冒烟测试会确认展开目录直启、没有新增 AppData 运行时副本、内置 Node、主题桥、随机回环 HTTP、WebView 连接与进程树回收：
+Windows 的完整便携版冒烟测试会确认展开目录直启、没有新增 AppData 运行时副本、内置 Node、主题桥、附件浏览器插件、随机回环 HTTP、WebView 连接与进程树回收：
 
 ```powershell
 pnpm run test:release
@@ -200,7 +216,7 @@ pnpm run test:release
 
 `harness/` 是从明确上游提交导入的源码快照。更新时应整体导入一个确认过的上游提交，并在同一改动中更新 [`HARNESS_UPSTREAM.md`](HARNESS_UPSTREAM.md) 的提交号。
 
-请不要把 `harness/` 改回 Git 子模块，也不要提交 `node_modules/`、`lib/` 或 `dist/` 生成物。
+请不要把 `harness/` 改回 Git 子模块，也不要提交 `node_modules/`、Harness 的 `lib/` / `dist/`，或 `desktop-plugins/*/lib/`、`plugins/*/lib/` 生成物。
 
 更新后至少运行：
 

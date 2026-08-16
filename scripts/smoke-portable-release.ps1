@@ -69,6 +69,13 @@ try {
         (Join-Path $harnessRoot "package.json")
         $launcherPath
         (Join-Path $harnessRoot "node_modules\@deepseek-ai\dsh-web-frontend\dist\index.html")
+        (Join-Path $harnessRoot "desktop-plugins\desktop-bridge\lib\index.mjs")
+        (Join-Path $harnessRoot "plugins\dsh-attachments\lib\index.mjs")
+        (Join-Path $harnessRoot "plugins\dsh-attachments\lib\client.js")
+        (Join-Path $harnessRoot "plugins\dsh-attachments\cordis.patch.yml")
+        (Join-Path $harnessRoot "plugins\dsh-model-capabilities\lib\index.mjs")
+        (Join-Path $harnessRoot "plugins\dsh-model-capabilities\lib\client.js")
+        (Join-Path $harnessRoot "plugins\dsh-model-capabilities\cordis.patch.yml")
     )
     foreach ($path in $requiredFiles) {
         if (!(Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -148,6 +155,32 @@ try {
     }
     if ($response.Content -notmatch "data-dsh-desktop-theme-bridge") {
         throw "Packaged Harness HTML is missing the desktop theme bridge"
+    }
+    if ($response.Content -notmatch "dsh-attachments") {
+        throw "Packaged Harness HTML is missing the desktop attachment plugin manifest"
+    }
+    if ($response.Content -notmatch "dsh-model-capabilities") {
+        throw "Packaged Harness HTML is missing the model capabilities plugin manifest"
+    }
+    $attachmentBundle = Invoke-WebRequest `
+        -Uri "http://127.0.0.1:$($listener.LocalPort)/desktop-plugin-bundles/dsh-attachments/client.js" `
+        -UseBasicParsing `
+        -TimeoutSec 5
+    if (
+        $attachmentBundle.StatusCode -ne 200 -or
+        $attachmentBundle.Content -notmatch "dsh-attachments"
+    ) {
+        throw "Packaged Harness did not serve the desktop attachment browser bundle"
+    }
+    $capabilitiesBundle = Invoke-WebRequest `
+        -Uri "http://127.0.0.1:$($listener.LocalPort)/desktop-plugin-bundles/dsh-model-capabilities/client.js" `
+        -UseBasicParsing `
+        -TimeoutSec 5
+    if (
+        $capabilitiesBundle.StatusCode -ne 200 -or
+        $capabilitiesBundle.Content -notmatch "dsh-model-capabilities"
+    ) {
+        throw "Packaged Harness did not serve the model capabilities browser bundle"
     }
     if (
         ![string]::Equals(
@@ -236,6 +269,7 @@ try {
         "http_status=$([int]$response.StatusCode)"
         "html_bytes=$($response.RawContentLength)"
         "theme_bridge=present"
+        "desktop_attachments=present"
         "webview_process=$($webviewProcess.ProcessId)"
         "webview_connection=established"
     ) | Set-Content -LiteralPath $evidencePath -Encoding utf8
@@ -245,6 +279,7 @@ try {
     Write-Host "[portable-smoke] Expanded adjacent runtime launched directly"
     Write-Host "[portable-smoke] No AppData runtime copy was created"
     Write-Host "[portable-smoke] Desktop theme bridge present"
+    Write-Host "[portable-smoke] Desktop attachment plugin present"
     Write-Host "[portable-smoke] WebView iframe connection established"
 
     $nodePid = $nodeProcess.ProcessId

@@ -31,6 +31,7 @@ import { ModelListEditor } from './ModelListEditor.tsx'
 import type { ModelDraft } from './ModelListEditor.tsx'
 import { deriveKeyRef, messageOf } from './store.ts'
 import type { en } from './locales.ts'
+import type { ModelFieldRenderer } from './model-fields.ts'
 import styles from './ModelsSection.module.css'
 
 /** The settings namespace a hand-declared provider is written into. */
@@ -64,6 +65,8 @@ export interface CustomProviderCardProps {
   t: (key: keyof typeof en) => string
   /** Disable writes (read-only settings provider). */
   readOnly: boolean
+  /** Render fields contributed to each drafted model row. */
+  renderModelFields?: ModelFieldRenderer
   /** Close the card; `changed` reports whether a provider was created. */
   onClose: (changed: boolean) => void
 }
@@ -277,6 +280,7 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
         api={api}
         t={t}
         disabled={profileDisabled}
+        {...props.renderModelFields === undefined ? {} : { renderModelFields: props.renderModelFields }}
       />
       {failure !== undefined ? <p className={styles['error']}>{failure}</p> : null}
       {/* Only the gates with something to say render; the route-id gate has its

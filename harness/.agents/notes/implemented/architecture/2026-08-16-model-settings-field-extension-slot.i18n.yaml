@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-16-model-settings-field-extension-slot.md
+2026-08-16-model-settings-field-extension-slot.md: 5ef521643f5025b82ec5befbd59f7c09a2f474c0
+2026-08-16-model-settings-field-extension-slot.zh.md: 203f3f5c1378b1a568bce434f7b86f6dab8f72ad

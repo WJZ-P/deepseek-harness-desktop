@@ -53,6 +53,7 @@ describe('ui-settings-models apply', () => {
     const entry = before.slots.entries('settings.section')[0]!
     expect(entry.component).toBe(ModelsSection)
     expect(entry.options).toMatchObject({ id: 'models', order: 10 })
+    expect(before.slots.spec('settings.models.model.fields')).toEqual({ kind: 'list', scope: 'root' })
     // The nav label is a locale-following thunk; owners resolve at read time.
     expect(resolveSlotLabel(entry.options.label)).toBe('模型')
     const injected = (entry.inject as unknown as () => import('../src/client/ModelsSection.tsx').ModelsSectionInjected)()

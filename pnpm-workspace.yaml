@@ -1,2 +1,9 @@
+packages:
+  - plugins/*
+
+autoInstallPeers: false
+
 allowBuilds:
+  dsh-attachments: true
+  dsh-model-capabilities: true
   esbuild: true

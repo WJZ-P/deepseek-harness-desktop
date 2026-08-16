@@ -2,7 +2,10 @@ import { spawn } from "node:child_process";
 import { lstat, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { installDesktopThemeBridge } from "./desktop-theme-bridge.mjs";
+
+// Desktop integrations are out-of-tree Cordis plugins. Build their Host and
+// browser halves before deciding whether vendored Harness needs rebuilding.
+await import("./build-plugins.mjs");
 
 const desktopRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const harnessRoot = join(desktopRoot, "harness");
@@ -54,11 +57,17 @@ async function newestSourceMtime(directory) {
 
 function pnpmInvocation(args) {
   const pnpmCli = process.env.npm_execpath;
-  if (pnpmCli) {
+  if (pnpmCli?.toLowerCase().includes("pnpm")) {
     return { command: process.execPath, args: [pnpmCli, ...args] };
   }
+  if (process.platform === "win32") {
+    return {
+      command: process.env.ComSpec ?? "cmd.exe",
+      args: ["/d", "/s", "/c", "pnpm.cmd", ...args],
+    };
+  }
   return {
-    command: process.platform === "win32" ? "pnpm.cmd" : "pnpm",
+    command: "pnpm",
     args,
   };
 }
@@ -113,5 +122,3 @@ if (needsBuild) {
 } else {
   console.log("[harness] Vendored Harness is ready.");
 }
-
-await installDesktopThemeBridge(buildArtifacts[1]);

@@ -49,7 +49,7 @@ export function InputBar({
   renderSlot, useNotices, useLexicon, useMenuLauncher,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
-  placeholder, accessory, overlay, leftItems, rightItems, footer,
+  placeholder, accessory, attachmentItems, overlay, leftItems, rightItems, footer,
 }: InputBarProps) {
   const input = useInput(s => s)
   const notice = useNotices(s => s)
@@ -75,6 +75,14 @@ export function InputBar({
   const empty = draft.trim() === '' && attachments.length === 0
   const [preview, setPreview] = useState<ComposerAttachment | null>(null)
   const [dragActive, setDragActive] = useState(false)
+  const [contributedAttachments, setContributedAttachments] = useState({ sessionId, present: false })
+  const contributedAttachmentsPresent = contributedAttachments.sessionId === sessionId
+    && contributedAttachments.present
+  const reportContributedAttachments = useCallback((present: boolean) => {
+    setContributedAttachments(previous => previous.sessionId === sessionId && previous.present === present
+      ? previous
+      : { sessionId, present })
+  }, [sessionId])
   // Transient error banner (image-intake rejections and prompt failures): the
   // seq keys the Toast so an identical repeated message restarts the
   // hold-then-fade cycle instead of silently reusing the faded one.
@@ -676,14 +684,20 @@ export function InputBar({
       >
         {overlay !== undefined && <div className={css.overlayAnchor}>{overlay}</div>}
         {accessory !== undefined && <div className={css.accessory}>{accessory}</div>}
-        {railItems.length > 0 && (
-          <div className={css.attachments}>
+        {(railItems.length > 0 || attachmentItems != null) && (
+          <div
+            className={css.attachments}
+            hidden={railItems.length === 0 && !contributedAttachmentsPresent}
+          >
             <AttachmentRail
               items={railItems}
               labels={attachmentRailLabels(t)}
               onOpen={(item) => { setPreview(item.attachment) }}
               onRemove={(item) => { removeImage?.(item.attachment.id) }}
-            />
+              onContentChange={reportContributedAttachments}
+            >
+              {attachmentItems}
+            </AttachmentRail>
           </div>
         )}
         {/* One scrollport, two text layers. The hidden mirror renders draft+'\n' and stretches the

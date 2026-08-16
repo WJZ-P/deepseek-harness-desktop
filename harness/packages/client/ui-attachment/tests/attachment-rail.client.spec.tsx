@@ -4,7 +4,7 @@
 // exclusive vertical-wheel pan, and the new-item end reveal.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { AttachmentRail } from '../src/AttachmentRail.tsx'
 import type { AttachmentRailItem, AttachmentRailLabels } from '../src/AttachmentRail.tsx'
 
@@ -67,6 +67,37 @@ describe('AttachmentRail', () => {
     expect(onOpen).toHaveBeenCalledWith(items[0])
     fireEvent.click(view.getByRole('button', { name: '移除图片 b.png' }))
     expect(onRemove).toHaveBeenCalledWith(items[1])
+  })
+
+  it('renders plugin attachment cards in the same horizontal rail', () => {
+    const view = render(
+      <AttachmentRail items={[item('a')]} labels={labels} onOpen={vi.fn()} onRemove={vi.fn()}>
+        <div data-testid="plugin-attachment">notes.md</div>
+      </AttachmentRail>,
+    )
+    const rail = view.getByRole('group', { name: '待发送图片' })
+    expect(rail.querySelector('img')?.getAttribute('alt')).toBe('a.png')
+    expect(view.getByTestId('plugin-attachment').parentElement).toBe(rail)
+  })
+
+  it('reports rendered content instead of treating an empty plugin registration as a card', async () => {
+    const onContentChange = vi.fn()
+    const view = render(
+      <AttachmentRail items={[]} labels={labels} onOpen={vi.fn()} onRemove={vi.fn()} onContentChange={onContentChange} />,
+    )
+    expect(onContentChange).toHaveBeenLastCalledWith(false)
+
+    view.rerender(
+      <AttachmentRail items={[]} labels={labels} onOpen={vi.fn()} onRemove={vi.fn()} onContentChange={onContentChange}>
+        <div data-attachment-content="">notes.md</div>
+      </AttachmentRail>,
+    )
+    await waitFor(() => { expect(onContentChange).toHaveBeenLastCalledWith(true) })
+
+    view.rerender(
+      <AttachmentRail items={[]} labels={labels} onOpen={vi.fn()} onRemove={vi.fn()} onContentChange={onContentChange} />,
+    )
+    await waitFor(() => { expect(onContentChange).toHaveBeenLastCalledWith(false) })
   })
 
   it('shows edge arrows from scroll geometry and pages a viewport at a time', () => {

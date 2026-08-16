@@ -1,0 +1,6 @@
+# dsh-model-capabilities bundle layer. This Loader row activates the Host entry;
+# the package's dsh.client manifest exposes its browser bundle through standard
+# Harness client-module discovery.
+- insert:
+    - id: dsh-model-capabilities
+      name: dsh-model-capabilities

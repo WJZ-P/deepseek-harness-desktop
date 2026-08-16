@@ -35,6 +35,7 @@ import { EditorFooter } from './EditorFooter.tsx'
 import { ModelListEditor } from './ModelListEditor.tsx'
 import { deriveKeyRef, messageOf, protocolChoices } from './store.ts'
 import type { en } from './locales.ts'
+import type { ModelFieldRenderer } from './model-fields.ts'
 import styles from './ModelsSection.module.css'
 
 /** Per-adapter-family curated field sets (unknown namespaces get the hint alone). */
@@ -69,6 +70,8 @@ export interface ProviderEditorProps {
   t: (key: keyof typeof en) => string
   /** Disable writes (read-only settings provider). */
   readOnly: boolean
+  /** Render fields contributed to each pi-ai model row. */
+  renderModelFields?: ModelFieldRenderer
   /** Render only the credential field and actions, without provider settings. */
   credentialOnly?: boolean
   /** Require a newly entered credential before this editor can submit. */
@@ -460,7 +463,15 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
                   defaultMaxTokens={typeof defaultMaxTokens === 'number' ? defaultMaxTokens : undefined}
                 />
               )
-              : <ModelListEditor {...catalogProps} probe={probe} probeBlocked={keyFailure} api={api} />}
+              : (
+                <ModelListEditor
+                  {...catalogProps}
+                  probe={probe}
+                  probeBlocked={keyFailure}
+                  api={api}
+                  {...props.renderModelFields === undefined ? {} : { renderModelFields: props.renderModelFields }}
+                />
+              )}
           </div>
         </details>}
       </>

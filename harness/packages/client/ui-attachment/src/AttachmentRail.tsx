@@ -2,6 +2,7 @@
  * by edge arrows, hover-revealed per-item remove, single-click open. */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import clsx from 'clsx'
 import {
   IconChevronLeftOutline14, IconChevronRightOutline14, IconCloseFill14,
@@ -55,20 +56,27 @@ function pageBehavior(): ScrollBehavior {
  * newly added item is revealed at the rail's end while a rail that mounts
  * over an existing draft keeps its start position, and each thumbnail opens
  * on a single click while its remove control sits inside the card and
- * reveals on hover or focus. The owner decides mounting; it renders the rail
- * only while items exist.
+ * reveals on hover or focus. Plugin children share this scroll surface; the
+ * rail reports whether either native items or contributed children expose an
+ * attachment-content marker, so its owner can hide an empty slot wrapper.
  *
  * @param props.items - resolved thumbnails in draft order.
  * @param props.labels - rail-level strings (group name, open tooltip, arrows).
  * @param props.onOpen - single-click open of one item's original image.
  * @param props.onRemove - remove one item from the draft.
+ * @param props.onContentChange - reports actual rendered rail occupancy.
+ * @param props.children - attachment cards contributed by product-neutral slots.
  * @returns the rail group with its paging arrows.
  */
-export function AttachmentRail<T extends AttachmentRailItem>({ items, labels, onOpen, onRemove }: {
+export function AttachmentRail<T extends AttachmentRailItem>({ items, labels, onOpen, onRemove, onContentChange, children }: {
   items: readonly T[]
   labels: AttachmentRailLabels
   onOpen: (item: T) => void
   onRemove: (item: T) => void
+  /** Reports whether native items or plugin children expose real card content. */
+  onContentChange?: (present: boolean) => void
+  /** Product-neutral tail cards contributed by attachment plugins. */
+  children?: ReactNode
 }) {
   const railRef = useRef<HTMLDivElement | null>(null)
   // null marks the first layout pass: a rail that MOUNTS over an existing
@@ -83,8 +91,9 @@ export function AttachmentRail<T extends AttachmentRailItem>({ items, labels, on
     // 1px slack: engines report fractional scroll positions at the edges.
     const left = el.scrollLeft > 1
     const right = el.scrollLeft < el.scrollWidth - el.clientWidth - 1
+    onContentChange?.(el.querySelector('[data-attachment-content]') !== null)
     setEdges(prev => prev.left === left && prev.right === right ? prev : { left, right })
-  }, [])
+  }, [onContentChange])
   useLayoutEffect(() => {
     const grew = countRef.current !== null && items.length > countRef.current
     countRef.current = items.length
@@ -108,6 +117,12 @@ export function AttachmentRail<T extends AttachmentRailItem>({ items, labels, on
       const observer = new ResizeObserver(updateEdges)
       observer.observe(el)
       disconnect = () => { observer.disconnect() }
+    }
+    let disconnectMutations = (): void => {}
+    if (typeof MutationObserver !== 'undefined') {
+      const observer = new MutationObserver(updateEdges)
+      observer.observe(el, { childList: true, subtree: true })
+      disconnectMutations = () => { observer.disconnect() }
     }
     // The rail scrolls horizontally ONLY: any wheel tick with a vertical
     // component is consumed — without preventDefault it would also scroll the
@@ -134,6 +149,7 @@ export function AttachmentRail<T extends AttachmentRailItem>({ items, labels, on
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => {
       disconnect()
+      disconnectMutations()
       el.removeEventListener('wheel', onWheel)
     }
   }, [updateEdges])
@@ -165,7 +181,7 @@ export function AttachmentRail<T extends AttachmentRailItem>({ items, labels, on
         onScroll={updateEdges}
       >
         {items.map(item => (
-          <div key={item.id} className={css.item}>
+          <div key={item.id} className={css.item} data-attachment-content="">
             <button
               type="button"
               className={css.thumbnail}
@@ -184,6 +200,7 @@ export function AttachmentRail<T extends AttachmentRailItem>({ items, labels, on
             </button>
           </div>
         ))}
+        {children}
       </div>
       {edges.right && (
         <button
