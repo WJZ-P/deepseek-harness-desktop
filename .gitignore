@@ -3,7 +3,7 @@ dist/
 dist-ssr/
 release-runtime/
 desktop-plugins/*/lib/
-plugins/*/lib/
+/plugins/
 src-tauri/target/
 src-tauri/target-link-fix/
 .tmp-*/

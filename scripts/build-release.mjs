@@ -120,6 +120,11 @@ async function prepareHarness() {
   await run(invocation.command, invocation.args);
 }
 
+async function prepareBundledPlugins() {
+  const invocation = pnpmInvocation(["run", "plugin:build"]);
+  await run(invocation.command, invocation.args);
+}
+
 async function deployCli() {
   await rm(releaseRuntime, { recursive: true, force: true });
   await mkdir(releaseRuntime, { recursive: true });
@@ -666,6 +671,7 @@ async function hashFile(path) {
 }
 
 await prepareHarness();
+await prepareBundledPlugins();
 await deployCli();
 await stageBundledPlugins();
 await materializeHarnessClosure();

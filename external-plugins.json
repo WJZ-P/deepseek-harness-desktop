@@ -1,0 +1,14 @@
+{
+  "plugins": [
+    {
+      "id": "dsh-attachments",
+      "repository": "https://github.com/WJZ-P/dsh-attachments.git",
+      "commit": "d9a0f868b812073d72b2c50dd0053df074bcb628"
+    },
+    {
+      "id": "dsh-model-capabilities",
+      "repository": "https://github.com/WJZ-P/dsh-model-capabilities.git",
+      "commit": "5e1bd204440420fae2aeee888f2f5740eadede82"
+    }
+  ]
+}

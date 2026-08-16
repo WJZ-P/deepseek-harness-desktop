@@ -90,17 +90,19 @@ pnpm install
 pnpm tauri dev
 ```
 
-`harness/` 已直接包含在仓库中，不需要 `--recurse-submodules`，也不依赖相邻的其他仓库。首次开发运行时，Tauri 的 `beforeDevCommand` 会自动：
+`harness/` 已直接包含在仓库中，无需初始化 Git submodule。两个通用插件是独立仓库，桌面项目通过 [`external-plugins.json`](external-plugins.json) 锁定其提交，并在首次开发运行时自动准备到已忽略的 `plugins/` 工作区。Tauri 的 `beforeDevCommand` 会依次：
 
 1. 校验 Harness 关键源码；
 2. 根据 `harness/pnpm-lock.yaml` 准备依赖；
 3. 在产物缺失或落后时构建 Harness CLI 与 Web UI；
-4. 启动 Vite，再由 Tauri 启动 Harness Host。
+4. 获取、安装并构建锁定版本的外部插件；
+5. 启动 Vite，再由 Tauri 启动 Harness Host。
 
 也可以提前执行：
 
 ```powershell
 pnpm run harness:prepare
+pnpm run plugin:sync
 ```
 
 Vite 开发地址固定为 `http://localhost:821`，HMR 使用端口 `822`。Harness Host 使用操作系统分配的随机回环端口，避免与其他开发软件冲突。
@@ -113,8 +115,9 @@ Vite 开发地址固定为 `http://localhost:821`，HMR 使用端口 `822`。Har
 deepseek-harness-desktop/
 ├─ desktop-plugins/ # 仅由桌面封装携带的 Cordis 集成
 ├─ docs/assets/     # README Banner 等项目图片
+├─ external-plugins.json # 外部插件仓库与提交锁
 ├─ harness/         # 本仓库直接跟踪的完整 DeepSeek Harness 源码
-├─ plugins/         # 可通过 dsh plugin 安装的标准 DSH bundle（默认面向原生 DSH）
+├─ plugins/         # 本地外部插件 checkout；整个目录由父仓库忽略
 ├─ scripts/         # Harness 准备、发行构建与验证脚本
 ├─ src/             # 桌面外壳、自绘标题栏与启动/错误页
 ├─ src-tauri/       # Rust 窗口、便携运行时定位与进程监督器
@@ -126,13 +129,13 @@ deepseek-harness-desktop/
 
 ### 🧩 低侵入插件边界
 
-桌面专属桥与桌面预装的通用插件都没有继续散落进 `harness/` 业务包，而是通过启动时的 Cordis `--patch` 覆盖层装入。所有可复用插件遵循 [`plugins/README.md`](plugins/README.md) 中的官方 bundle 约定，设计时默认使用者运行的是原生 DSH：
+桌面专属桥与桌面预装的通用插件都没有继续散落进 `harness/` 业务包，而是通过启动时的 Cordis `--patch` 覆盖层装入。可复用插件各自拥有独立仓库、锁文件、CI 与发布边界；桌面仓库只记录来源和精确提交：
 
 - `desktop-bridge`：在 Host 返回 HTML 时注入深浅主题同步桥，并把 Desktop 以 `file://` 挂载的标准插件映射回同一份 `dsh.client` 启动图；公开插件无需携带 Tauri 分支，也不再改写生成后的 `index.html`；
-- [`dsh-attachments`](plugins/dsh-attachments/)：位于 `plugins/` 的标准 DSH bundle，同时声明 `dsh.bundle` 与 Web `dsh.client`，既可由桌面封装携带，也可通过 `dsh plugin --profile web add` 安装到原生 DSH；它沿用 Harness 已有的图片拖放/粘贴链路，只接管普通文件与文件夹。拖入一个文件夹只生成一个附件卡片，并以完整目录树的形式复制到工作区，不再把其中每个文件逐项塞进输入栏；同时提供流式上传/下载、输入区附件卡片与持久历史卡片。插件本身不设置文件数量或单文件字节上限，也不额外占用输入栏按钮；
-- [`dsh-model-capabilities`](plugins/dsh-model-capabilities/)：同样位于 `plugins/` 的标准 DSH bundle；在新增或编辑 pi-ai 模型时提供 Input Modalities 选择，可明确声明继承默认值、文本、图片或文本加图片，并可独立安装到原生 DSH；
+- [`dsh-attachments`](https://github.com/WJZ-P/dsh-attachments)：标准 DSH bundle，同时声明 `dsh.bundle` 与 Web `dsh.client`，既可由桌面封装携带，也可通过 `dsh plugin --profile web add` 安装到原生 DSH；它沿用 Harness 已有的图片拖放/粘贴链路，只接管普通文件与文件夹。拖入一个文件夹只生成一个附件卡片，并以完整目录树的形式复制到工作区；同时提供流式上传/下载、输入区附件卡片与持久历史卡片。插件本身不设置文件数量或单文件字节上限，也不额外占用输入栏按钮；
+- [`dsh-model-capabilities`](https://github.com/WJZ-P/dsh-model-capabilities)：标准 DSH bundle；在新增或编辑 pi-ai 模型时提供 Input Modalities 选择，可明确声明继承默认值、文本、图片或文本加图片，并可独立安装到原生 DSH；
 - 普通文件会保存到 Harness 数据目录，并在消息真正进入模型步骤前复制到工作区 `.deepseek-harness/attachments/`，模型拿到的是可直接读取的工作区路径；
-- `harness/` 内只保留通用的 **输入附件栏 slot** 与 **模型行字段 slot**；浏览器 bundle 直接使用 Harness 官方 `dsh.client` 发现链路，具体 UI、存储和消息关联逻辑留在上游树外的 `plugins/` 与 `desktop-plugins/`。以后同步上游时，冲突面依旧很小喵～
+- `harness/` 内只保留通用的 **输入附件栏 slot** 与 **模型行字段 slot**；浏览器 bundle 直接使用 Harness 官方 `dsh.client` 发现链路，具体 UI、存储和消息关联逻辑留在独立插件仓库与 `desktop-plugins/`。以后同步上游时，冲突面依旧很小喵～
 
 ## 🧭 架构
 
@@ -165,7 +168,8 @@ flowchart LR
 | --- | --- |
 | `pnpm tauri dev` | 启动 Harness 与 Tauri 开发环境 |
 | `pnpm run harness:prepare` | 校验、安装并按需构建 Harness |
-| `pnpm run plugin:test` | 校验标准 bundle 清单，并构建、测试桌面桥及全部通用插件 |
+| `pnpm run plugin:sync` | 按 `external-plugins.json` 准备外部插件 checkout 与依赖 |
+| `pnpm run plugin:test` | 构建并测试桌面桥及锁定版本的外部插件 |
 | `pnpm run check` | 校验 Harness 源码完整性、TypeScript 与 Rust |
 | `pnpm run build:frontend` | 只构建桌面启动外壳，不生成原生发行包 |
 | `pnpm run build` | 构建当前平台的完整自包含发行包 |
@@ -182,7 +186,7 @@ pnpm run build
 pnpm run verify:release-artifacts
 ```
 
-构建流程会依次准备 Harness、生成并校验生产依赖闭包、内置当前平台 Node.js、执行随机回环端口 HTTP 冒烟，再把展开后的生产运行时作为 Tauri resource 编译并打包。Windows portable ZIP 中会保留可直接浏览的 `runtime/harness/` 原始目录结构。
+构建流程会依次准备 Harness、同步并构建锁定提交的外部插件、生成并校验生产依赖闭包、内置当前平台 Node.js、执行随机回环端口 HTTP 冒烟，再把展开后的生产运行时作为 Tauri resource 编译并打包。Windows portable ZIP 中会保留可直接浏览的 `runtime/harness/` 原始目录结构。
 
 | 平台 | Release 资产命名 |
 | --- | --- |
@@ -216,7 +220,7 @@ pnpm run test:release
 
 `harness/` 是从明确上游提交导入的源码快照。更新时应整体导入一个确认过的上游提交，并在同一改动中更新 [`HARNESS_UPSTREAM.md`](HARNESS_UPSTREAM.md) 的提交号。
 
-请不要把 `harness/` 改回 Git 子模块，也不要提交 `node_modules/`、Harness 的 `lib/` / `dist/`，或 `desktop-plugins/*/lib/`、`plugins/*/lib/` 生成物。
+`harness/` 保持普通 Git 文件；`node_modules/`、Harness 的 `lib/` / `dist/`、`desktop-plugins/*/lib/` 以及整个本地 `plugins/` 工作区都在忽略范围内。公共插件的变更应提交到各自仓库，再同步更新 [`external-plugins.json`](external-plugins.json) 的提交锁。
 
 更新后至少运行：
 

@@ -1,6 +1,0 @@
-# dsh-attachments bundle layer. This Loader row activates the Host half; the
-# package's dsh.client manifest exposes its browser bundle through the standard
-# Harness client-module discovery path.
-- insert:
-    - id: dsh-attachments
-      name: dsh-attachments
