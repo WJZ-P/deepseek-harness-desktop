@@ -52,7 +52,7 @@ All three files use GitHub-hosted PNG URLs and preserve the intended storefront 
 - [x] Repository is older than one day and currently has at least ten commits.
 - [x] Avoid advertising the unrelated unscoped `dsh-attachments` npm package; use the GitHub subpackage install spec.
 - [ ] Select a distinct npm registry name and publish the prebuilt package (recommended, not required for the catalog PR).
-- [ ] Add the `dsh-plugin` topic to `WJZ-P/deepseek-harness-desktop` on GitHub.
+- [x] Add the `dsh-plugin` topic to `WJZ-P/deepseek-harness-desktop` on GitHub.
 - [x] Add and review 1-8 screenshots from `assets/screenshots/`.
 - [x] Rehearse README generation, `awesome-lint`, and the storefront build against a fresh catalog checkout.
 - [ ] Open the catalog PR with the YAML file, regenerated READMEs, and optional screenshot JSON entry.
