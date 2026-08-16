@@ -3,12 +3,12 @@
     {
       "id": "dsh-attachments",
       "repository": "https://github.com/WJZ-P/dsh-attachments.git",
-      "commit": "b2387276a962aa63cab23b35867590a66bc218fd"
+      "commit": "d8009ccf0cb50f8cacfd994ab31bdb6783938acb"
     },
     {
       "id": "dsh-model-capabilities",
       "repository": "https://github.com/WJZ-P/dsh-model-capabilities.git",
-      "commit": "abb10fc3b447eaf7f1b6cc9fd1c31ca07d509930"
+      "commit": "5e6207933243633b27d16ac66e2591abb574f3fb"
     }
   ]
 }
