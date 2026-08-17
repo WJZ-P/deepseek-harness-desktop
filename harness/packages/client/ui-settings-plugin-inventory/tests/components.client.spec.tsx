@@ -95,6 +95,22 @@ describe('PluginInventorySettingsTab', () => {
     expect(screen.getByText(en.emptySearch)).toBeTruthy()
   })
 
+  it('labels the built-in local attachment provider as attachment', async () => {
+    const snapshot = {
+      entries: [{
+        entryId: 'attachment-local',
+        moduleName: '@deepseek-ai/dsh-attachment-local',
+        enabled: true,
+        fiberPhase: 'active',
+      }],
+    } as unknown as Snapshot
+    const view = render(<PluginInventorySettingsTab {...props(async () => snapshot)} />)
+
+    const card = await screen.findByRole('button', { name: 'attachment, Mounted, Enabled' })
+    fireEvent.click(card)
+    expect(view.container.querySelector('[data-loader-entry]')?.textContent).toBe('attachment-local')
+  })
+
   it('shows a generic failure and retries into the empty state', async () => {
     const list = vi.fn<PluginInventorySettingsTabInjected['list']>()
       .mockRejectedValueOnce(new Error('private transport detail'))

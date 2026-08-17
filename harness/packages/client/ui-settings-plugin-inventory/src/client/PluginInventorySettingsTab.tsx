@@ -44,8 +44,14 @@ function phaseLabel(
   return phase === null ? t('unobserved') : t(PHASE_KEYS[phase])
 }
 
+const MODULE_TITLE_ALIASES: Readonly<Record<string, string>> = {
+  '@deepseek-ai/dsh-attachment-local': 'attachment',
+}
+
 /** Compact a module specifier without guessing whether its Loader id was generated. */
 function moduleShortName(moduleName: string): string {
+  const alias = MODULE_TITLE_ALIASES[moduleName]
+  if (alias !== undefined) return alias
   const unscoped = moduleName.startsWith('@') ? moduleName.slice(moduleName.indexOf('/') + 1) : moduleName
   return unscoped
     .replace(/^cordis:/, '')
