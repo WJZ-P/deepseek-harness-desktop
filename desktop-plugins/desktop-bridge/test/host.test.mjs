@@ -81,12 +81,13 @@ test('Desktop bundle injection reports malformed shell HTML', () => {
   )
 })
 
-test('apply registers exact routes and both index transforms', () => {
+test('apply discovers file-mounted bundles that activate after the bridge', () => {
   const routes = []
   const taps = []
+  const entries = []
   const ctx = {
     loader: {
-      entries: () => [{ options: { name: pluginEntry('dsh-attachments') } }],
+      entries: () => entries,
     },
     webServer: {
       register: (route) => {
@@ -102,16 +103,25 @@ test('apply registers exact routes and both index transforms', () => {
   }
 
   apply(ctx)
+  entries.push(
+    { options: { name: pluginEntry('dsh-attachments') } },
+    { options: { name: pluginEntry('dsh-model-capabilities') } },
+  )
   assert.equal(routes.length, 1)
-  assert.equal(routes[0].kind, 'exact')
-  assert.equal(routes[0].path, '/desktop-plugin-bundles/dsh-attachments/client.js')
+  assert.equal(routes[0].kind, 'prefix')
+  assert.equal(routes[0].path, '/desktop-plugin-bundles')
   assert.equal(taps.length, 2)
+
+  const source = '<html><head><script>window.__DSH_BOOT__ = {"rev":"base","entries":[]}</script></head><body></body></html>'
+  const transformed = taps.reduce((html, tap) => tap(html), source)
+  assert.match(transformed, /"id":"dsh-attachments"/)
+  assert.match(transformed, /"id":"dsh-model-capabilities"/)
 
   let status
   let headers
   let responseBody
   routes[0].handler(
-    { method: 'GET' },
+    { method: 'GET', url: '/desktop-plugin-bundles/dsh-model-capabilities/client.js?rev=test' },
     {
       writeHead: (nextStatus, nextHeaders) => {
         status = nextStatus
@@ -122,5 +132,14 @@ test('apply registers exact routes and both index transforms', () => {
   )
   assert.equal(status, 200)
   assert.equal(headers['content-type'], 'text/javascript; charset=utf-8')
-  assert.match(responseBody.toString('utf8'), /dsh-attachments/)
+  assert.match(responseBody.toString('utf8'), /dsh-model-capabilities/)
+
+  routes[0].handler(
+    { method: 'GET', url: '/desktop-plugin-bundles/missing/client.js' },
+    {
+      writeHead: nextStatus => { status = nextStatus },
+      end: () => {},
+    },
+  )
+  assert.equal(status, 404)
 })

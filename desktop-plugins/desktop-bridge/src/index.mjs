@@ -159,7 +159,7 @@ export function injectDesktopClientBundles(html, bundles) {
   return `${html.slice(0, headEnd.index)}  ${script}\n${html.slice(headEnd.index)}`
 }
 
-/** Serve one immutable-in-process browser bundle over a dedicated exact route. */
+/** Serve one immutable-in-process browser bundle. */
 function serveBundle(bundle, req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { allow: 'GET, HEAD' })
@@ -174,21 +174,35 @@ function serveBundle(bundle, req, res) {
   res.end(req.method === 'HEAD' ? undefined : bundle.body)
 }
 
+/** Resolve and serve one bundle from the Loader's current file-mounted entries. */
+function serveDiscoveredBundle(bundles, req, res) {
+  const pathname = new URL(req.url ?? '/', 'http://desktop.local').pathname
+  const bundle = bundles.find(candidate => candidate.routePath === pathname)
+  if (bundle === undefined) {
+    res.writeHead(404)
+    res.end()
+    return
+  }
+  serveBundle(bundle, req, res)
+}
+
 /** Mount the theme synchronization and the Desktop-only package resolver. */
 export function apply(ctx) {
-  const bundles = collectDesktopClientBundles(ctx.loader.entries())
-  for (const bundle of bundles) {
-    ctx.effect(
-      () => ctx.webServer.register({
-        kind: 'exact',
-        path: bundle.routePath,
-        handler: (req, res) => serveBundle(bundle, req, res),
-      }),
-      `desktop-bridge: browser bundle route for ${bundle.entry.id}`,
-    )
-  }
+  // Loader mounts sibling rows concurrently. Resolve the file-mounted package
+  // table when HTTP actually asks for the index or a bundle, after startup has
+  // settled, instead of snapshotting whichever rows happened to exist while
+  // desktop-bridge itself was activating.
+  const bundles = () => collectDesktopClientBundles(ctx.loader.entries())
   ctx.effect(
-    () => ctx.webServer.tapIndex(html => injectDesktopClientBundles(html, bundles)),
+    () => ctx.webServer.register({
+      kind: 'prefix',
+      path: CLIENT_BUNDLE_ROUTE_PREFIX,
+      handler: (req, res) => serveDiscoveredBundle(bundles(), req, res),
+    }),
+    'desktop-bridge: browser bundle routes',
+  )
+  ctx.effect(
+    () => ctx.webServer.tapIndex(html => injectDesktopClientBundles(html, bundles())),
     'desktop-bridge: file-mounted client bundle discovery',
   )
   ctx.effect(
