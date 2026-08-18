@@ -1,10 +1,11 @@
-import { access, copyFile, mkdir, readFile, readdir } from 'node:fs/promises'
+import { access, copyFile, cp, mkdir, readFile, readdir, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const desktopBridgeRoot = join(repositoryRoot, 'desktop-plugins', 'desktop-bridge')
 const publicPluginsRoot = join(repositoryRoot, 'plugins')
+const harnessRoot = join(repositoryRoot, 'harness')
 
 async function buildDesktopBridge() {
   const outDir = join(desktopBridgeRoot, 'lib')
@@ -79,12 +80,31 @@ async function assertStandardBundle(root, directory) {
 
 async function buildPublicPlugins() {
   const entries = await readdir(publicPluginsRoot, { withFileTypes: true })
+  const roots = []
   for (const entry of entries.filter(row => row.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
     const root = join(publicPluginsRoot, entry.name)
     await assertStandardBundle(root, entry.name)
     await import(`${pathToFileURL(join(root, 'scripts', 'build.mjs')).href}?build=${Date.now()}`)
+    roots.push(root)
   }
+  return roots
+}
+
+async function stageResolverPackage(root) {
+  const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+  const destination = join(harnessRoot, 'node_modules', ...manifest.name.split('/'))
+  await rm(destination, { recursive: true, force: true })
+  await mkdir(join(destination, 'lib'), { recursive: true })
+  await copyFile(join(root, 'package.json'), join(destination, 'package.json'))
+  await cp(join(root, 'lib'), join(destination, 'lib'), {
+    recursive: true,
+    dereference: true,
+  })
+  console.log(`[plugins] Staged resolvable package ${manifest.name}`)
 }
 
 await buildDesktopBridge()
-await buildPublicPlugins()
+const publicPluginRoots = await buildPublicPlugins()
+for (const root of [desktopBridgeRoot, ...publicPluginRoots]) {
+  await stageResolverPackage(root)
+}

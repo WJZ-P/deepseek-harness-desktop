@@ -70,12 +70,20 @@ try {
         $launcherPath
         (Join-Path $harnessRoot "node_modules\@deepseek-ai\dsh-web-frontend\dist\index.html")
         (Join-Path $harnessRoot "desktop-plugins\desktop-bridge\lib\index.mjs")
+        (Join-Path $harnessRoot "node_modules\@deepseek-ai\dsh-desktop-bridge\package.json")
+        (Join-Path $harnessRoot "node_modules\@deepseek-ai\dsh-desktop-bridge\lib\index.mjs")
         (Join-Path $harnessRoot "plugins\dsh-attachments\lib\index.mjs")
         (Join-Path $harnessRoot "plugins\dsh-attachments\lib\client.js")
         (Join-Path $harnessRoot "plugins\dsh-attachments\cordis.patch.yml")
+        (Join-Path $harnessRoot "node_modules\dsh-attachments\package.json")
+        (Join-Path $harnessRoot "node_modules\dsh-attachments\lib\index.mjs")
+        (Join-Path $harnessRoot "node_modules\dsh-attachments\lib\client.js")
         (Join-Path $harnessRoot "plugins\dsh-model-capabilities\lib\index.mjs")
         (Join-Path $harnessRoot "plugins\dsh-model-capabilities\lib\client.js")
         (Join-Path $harnessRoot "plugins\dsh-model-capabilities\cordis.patch.yml")
+        (Join-Path $harnessRoot "node_modules\dsh-model-capabilities\package.json")
+        (Join-Path $harnessRoot "node_modules\dsh-model-capabilities\lib\index.mjs")
+        (Join-Path $harnessRoot "node_modules\dsh-model-capabilities\lib\client.js")
     )
     foreach ($path in $requiredFiles) {
         if (!(Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -87,6 +95,17 @@ try {
     }
     if (!(Test-Path -LiteralPath $harnessRoot -PathType Container)) {
         throw "Portable release is missing expanded Harness runtime: $harnessRoot"
+    }
+    $runtimeManifest = Get-Content -LiteralPath (Join-Path $harnessRoot "package.json") -Raw |
+        ConvertFrom-Json
+    foreach ($packageName in @(
+        "@deepseek-ai/dsh-desktop-bridge",
+        "dsh-attachments",
+        "dsh-model-capabilities"
+    )) {
+        if ($runtimeManifest.dependencies.PSObject.Properties.Name -notcontains $packageName) {
+            throw "Portable runtime dependency surface is missing $packageName"
+        }
     }
     $obsoleteArchivePath = Join-Path $portableRoot "runtime\harness.tar.gz"
     if (Test-Path -LiteralPath $obsoleteArchivePath) {
@@ -162,8 +181,42 @@ try {
     if ($response.Content -notmatch "dsh-model-capabilities") {
         throw "Packaged Harness HTML is missing the model capabilities plugin manifest"
     }
+    foreach ($packageName in @(
+        "@deepseek-ai/dsh-desktop-bridge",
+        "dsh-attachments",
+        "dsh-model-capabilities"
+    )) {
+        $profilePackage = Join-Path $dshHome (
+            "profiles\node_modules\{0}\package.json" -f $packageName.Replace("/", "\")
+        )
+        if (!(Test-Path -LiteralPath $profilePackage -PathType Leaf)) {
+            throw "Harness did not expose the bundled package to the profile resolver: $packageName"
+        }
+    }
+    $overlay = Get-ChildItem $env:TEMP `
+        -Filter "deepseek-harness-desktop-$($app.Id)-*.patch.yml" `
+        -File `
+        -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($null -eq $overlay) {
+        throw "Portable desktop application did not retain its launch overlay"
+    }
+    $overlayContent = Get-Content -LiteralPath $overlay.FullName -Raw
+    foreach ($packageName in @(
+        "@deepseek-ai/dsh-desktop-bridge",
+        "dsh-attachments",
+        "dsh-model-capabilities"
+    )) {
+        if ($overlayContent -notmatch "name: '$([regex]::Escape($packageName))'") {
+            throw "Portable launch overlay is missing package mount $packageName"
+        }
+    }
+    if ($overlayContent -match "file://") {
+        throw "Portable launch overlay exposed a plugin file URL instead of a package name"
+    }
     $attachmentBundle = Invoke-WebRequest `
-        -Uri "http://127.0.0.1:$($listener.LocalPort)/desktop-plugin-bundles/dsh-attachments/client.js" `
+        -Uri "http://127.0.0.1:$($listener.LocalPort)/plugins/dsh-attachments/client.js" `
         -UseBasicParsing `
         -TimeoutSec 5
     if (
@@ -173,7 +226,7 @@ try {
         throw "Packaged Harness did not serve the desktop attachment browser bundle"
     }
     $capabilitiesBundle = Invoke-WebRequest `
-        -Uri "http://127.0.0.1:$($listener.LocalPort)/desktop-plugin-bundles/dsh-model-capabilities/client.js" `
+        -Uri "http://127.0.0.1:$($listener.LocalPort)/plugins/dsh-model-capabilities/client.js" `
         -UseBasicParsing `
         -TimeoutSec 5
     if (
@@ -270,6 +323,8 @@ try {
         "html_bytes=$($response.RawContentLength)"
         "theme_bridge=present"
         "desktop_attachments=present"
+        "plugin_mounts=package-names"
+        "profile_resolver=bundled-package-links"
         "webview_process=$($webviewProcess.ProcessId)"
         "webview_connection=established"
     ) | Set-Content -LiteralPath $evidencePath -Encoding utf8
@@ -280,6 +335,8 @@ try {
     Write-Host "[portable-smoke] No AppData runtime copy was created"
     Write-Host "[portable-smoke] Desktop theme bridge present"
     Write-Host "[portable-smoke] Desktop attachment plugin present"
+    Write-Host "[portable-smoke] Plugins mounted by package name"
+    Write-Host "[portable-smoke] Profile resolver package links present"
     Write-Host "[portable-smoke] WebView iframe connection established"
 
     $nodePid = $nodeProcess.ProcessId

@@ -15,16 +15,31 @@ import {
 import { constants as fsConstants, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const desktopRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const harnessRoot = join(desktopRoot, "harness");
 const releaseRuntime = join(desktopRoot, "release-runtime");
 const stagingRoot = join(releaseRuntime, "harness");
 const bundledPlugins = [
-  { id: "desktop-bridge", root: "desktop-plugins", directory: "desktop-bridge" },
-  { id: "dsh-attachments", root: "plugins", directory: "dsh-attachments" },
-  { id: "dsh-model-capabilities", root: "plugins", directory: "dsh-model-capabilities" },
+  {
+    id: "desktop-bridge",
+    packageName: "@deepseek-ai/dsh-desktop-bridge",
+    root: "desktop-plugins",
+    directory: "desktop-bridge",
+  },
+  {
+    id: "dsh-attachments",
+    packageName: "dsh-attachments",
+    root: "plugins",
+    directory: "dsh-attachments",
+  },
+  {
+    id: "dsh-model-capabilities",
+    packageName: "dsh-model-capabilities",
+    root: "plugins",
+    directory: "dsh-model-capabilities",
+  },
 ].map((plugin) => ({
   ...plugin,
   source: join(desktopRoot, plugin.root, plugin.directory),
@@ -145,6 +160,9 @@ async function deployCli() {
 }
 
 async function stageBundledPlugins() {
+  const runtimeManifestPath = join(stagingRoot, "package.json");
+  const runtimeManifest = JSON.parse(await readFile(runtimeManifestPath, "utf8"));
+  runtimeManifest.dependencies ??= {};
   for (const plugin of bundledPlugins) {
     await mkdir(join(plugin.staged, "lib"), { recursive: true });
     await copyFile(join(plugin.source, "package.json"), join(plugin.staged, "package.json"));
@@ -160,8 +178,29 @@ async function stageBundledPlugins() {
         if (error?.code !== "ENOENT") throw error;
       }
     }
+    const resolverPackage = join(
+      stagingRoot,
+      "node_modules",
+      ...plugin.packageName.split("/"),
+    );
+    await rm(resolverPackage, { recursive: true, force: true });
+    await mkdir(dirname(resolverPackage), { recursive: true });
+    await cp(plugin.staged, resolverPackage, {
+      recursive: true,
+      dereference: true,
+    });
+    const pluginManifest = JSON.parse(
+      await readFile(join(plugin.staged, "package.json"), "utf8"),
+    );
+    runtimeManifest.dependencies[plugin.packageName] = pluginManifest.version;
     console.log(`[release] Staged bundled plugin: ${plugin.staged}`);
+    console.log(`[release] Staged resolvable plugin package: ${plugin.packageName}`);
   }
+  await writeFile(
+    runtimeManifestPath,
+    `${JSON.stringify(runtimeManifest, undefined, 2)}\n`,
+  );
+  console.log("[release] Registered bundled plugins in the runtime dependency surface.");
 }
 
 function resolvePackageManifest(anchor, packageName) {
@@ -402,9 +441,8 @@ async function terminateChild(child) {
 async function smokeRuntime() {
   const smokeOverlay = join(releaseRuntime, "desktop-smoke.patch.yml");
   const overlayRows = bundledPlugins.map((plugin) => {
-    const pluginUrl = pathToFileURL(join(plugin.staged, "lib", "index.mjs"))
-      .href.replaceAll("'", "''");
-    return `    - id: ${plugin.id}\n      name: '${pluginUrl}'`;
+    const packageName = plugin.packageName.replaceAll("'", "''");
+    return `    - id: ${plugin.id}\n      name: '${packageName}'`;
   }).join("\n");
   await writeFile(
     smokeOverlay,
@@ -466,7 +504,7 @@ async function smokeRuntime() {
           throw new Error("Harness smoke manifest is missing the model capabilities bundle.");
         }
         const clientResponse = await fetch(
-          `${ready[1]}/desktop-plugin-bundles/dsh-attachments/client.js`,
+          `${ready[1]}/plugins/dsh-attachments/client.js`,
         );
         const clientBody = await clientResponse.text();
         if (clientResponse.status !== 200
@@ -474,7 +512,7 @@ async function smokeRuntime() {
           throw new Error(`Desktop attachments bundle returned HTTP ${clientResponse.status}.`);
         }
         const capabilitiesResponse = await fetch(
-          `${ready[1]}/desktop-plugin-bundles/dsh-model-capabilities/client.js`,
+          `${ready[1]}/plugins/dsh-model-capabilities/client.js`,
         );
         const capabilitiesBody = await capabilitiesResponse.text();
         if (capabilitiesResponse.status !== 200

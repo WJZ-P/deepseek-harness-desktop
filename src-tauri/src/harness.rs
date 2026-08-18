@@ -24,7 +24,14 @@ struct RuntimePaths {
     root: PathBuf,
     launcher: PathBuf,
     node: PathBuf,
-    bundled_plugins: Vec<(&'static str, PathBuf)>,
+    bundled_plugins: Vec<BundledPlugin>,
+    source_checkout: bool,
+}
+
+struct BundledPlugin {
+    id: &'static str,
+    package_name: &'static str,
+    package_root: PathBuf,
 }
 
 #[derive(Clone, Serialize)]
@@ -139,6 +146,9 @@ impl Drop for HarnessProcess {
 
 fn start_harness(state: &Arc<Mutex<HarnessProcess>>, window: &WebviewWindow) -> Result<(), String> {
     let runtime = resolve_runtime(state, window)?;
+    if runtime.source_checkout {
+        ensure_source_plugin_fallbacks(&runtime)?;
+    }
     let overlay = create_desktop_overlay(&runtime.bundled_plugins)?;
     lock(state).overlay = Some(overlay.clone());
 
@@ -324,12 +334,13 @@ fn source_runtime(path: PathBuf) -> Result<RuntimePaths, String> {
     let shared_plugins_root = env::var_os("DSH_PLUGINS_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| repository_root.join("plugins"));
-    let bundled_plugins = checked_plugins(&desktop_plugins_root, &shared_plugins_root)?;
+    let bundled_plugins = checked_plugins(&root, &desktop_plugins_root, &shared_plugins_root)?;
     Ok(RuntimePaths {
         launcher: root.join("apps").join("cli").join("lib").join("bin.js"),
         root,
         node,
         bundled_plugins,
+        source_checkout: true,
     })
 }
 
@@ -342,12 +353,14 @@ fn bundled_runtime(path: PathBuf, node: PathBuf) -> Result<RuntimePaths, String>
     }
     let root = dunce::canonicalize(&path)
         .map_err(|error| format!("解析便携 Harness 运行时路径失败：{error}"))?;
-    let bundled_plugins = checked_plugins(&root.join("desktop-plugins"), &root.join("plugins"))?;
+    let bundled_plugins =
+        checked_plugins(&root, &root.join("desktop-plugins"), &root.join("plugins"))?;
     Ok(RuntimePaths {
         launcher: root.join("lib").join("bin.js"),
         root,
         node,
         bundled_plugins,
+        source_checkout: false,
     })
 }
 
@@ -362,40 +375,149 @@ fn checked_plugin(path: PathBuf) -> Result<PathBuf, String> {
 }
 
 fn checked_plugins(
+    module_root: &Path,
     desktop_root: &Path,
     shared_root: &Path,
-) -> Result<Vec<(&'static str, PathBuf)>, String> {
+) -> Result<Vec<BundledPlugin>, String> {
     [
-        ("desktop-bridge", desktop_root.join("desktop-bridge")),
-        ("dsh-attachments", shared_root.join("dsh-attachments")),
         (
+            "desktop-bridge",
+            "@deepseek-ai/dsh-desktop-bridge",
+            desktop_root.join("desktop-bridge"),
+        ),
+        (
+            "dsh-attachments",
+            "dsh-attachments",
+            shared_root.join("dsh-attachments"),
+        ),
+        (
+            "dsh-model-capabilities",
             "dsh-model-capabilities",
             shared_root.join("dsh-model-capabilities"),
         ),
     ]
     .into_iter()
-    .map(|(id, directory)| {
-        checked_plugin(directory.join("lib").join("index.mjs")).map(|path| (id, path))
+    .map(|(id, package_name, directory)| {
+        checked_plugin(directory.join("lib").join("index.mjs"))?;
+        let manifest = package_name
+            .split('/')
+            .fold(module_root.join("node_modules"), |path, segment| {
+                path.join(segment)
+            })
+            .join("package.json");
+        if !has_content(&manifest) {
+            return Err(format!(
+                "插件包解析入口不完整：{}\n请先运行 pnpm run plugin:build。",
+                manifest.display()
+            ));
+        }
+        let package_root = manifest
+            .parent()
+            .ok_or_else(|| format!("插件包解析入口缺少父目录：{}", manifest.display()))?
+            .to_path_buf();
+        Ok(BundledPlugin {
+            id,
+            package_name,
+            package_root,
+        })
     })
     .collect()
 }
 
-fn desktop_overlay_content(plugins: &[(&str, PathBuf)]) -> Result<String, String> {
+fn ensure_source_plugin_fallbacks(runtime: &RuntimePaths) -> Result<(), String> {
+    let links = runtime
+        .bundled_plugins
+        .iter()
+        .map(|plugin| {
+            (
+                plugin.package_name,
+                plugin.package_root.to_string_lossy().into_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let encoded = serde_json::to_string(&links)
+        .map_err(|error| format!("序列化桌面插件解析链接失败：{error}"))?;
+    let script = r#"
+const { homedir } = require('node:os');
+const { dirname, join, resolve } = require('node:path');
+const {
+  lstatSync, mkdirSync, readlinkSync, symlinkSync, unlinkSync,
+} = require('node:fs');
+
+const configured = (process.env.DSH_HOME ?? '').trim();
+const expanded = configured === '~'
+  ? homedir()
+  : configured.startsWith('~/') || configured.startsWith('~\\')
+    ? join(homedir(), configured.slice(2))
+    : configured;
+const home = resolve(expanded || join(homedir(), '.dsh'));
+const modules = join(home, 'profiles', 'node_modules');
+
+for (const [name, target] of JSON.parse(process.argv[1])) {
+  const link = join(modules, ...name.split('/'));
+  mkdirSync(dirname(link), { recursive: true });
+  let current;
+  try {
+    current = lstatSync(link);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  if (current !== undefined) {
+    if (!current.isSymbolicLink()) {
+      throw new Error(`${link} exists and is not a managed plugin link`);
+    }
+    if (resolve(dirname(link), readlinkSync(link)) === resolve(target)) continue;
+    unlinkSync(link);
+  }
+  symlinkSync(resolve(target), link, process.platform === 'win32' ? 'junction' : 'dir');
+}
+"#;
+    let mut command = Command::new(&runtime.node);
+    command
+        .arg("-e")
+        .arg(script)
+        .arg(&encoded)
+        .current_dir(&runtime.root)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null());
+    #[cfg(windows)]
+    suppress_console_window(&mut command);
+    let output = command
+        .output()
+        .map_err(|error| format!("建立桌面插件解析链接失败：{error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(format!(
+        "建立桌面插件解析链接失败（退出码 {}）：{}",
+        output.status.code().unwrap_or(-1),
+        if stderr.is_empty() {
+            "Node 未返回错误详情"
+        } else {
+            &stderr
+        }
+    ))
+}
+
+fn desktop_overlay_content(plugins: &[BundledPlugin]) -> Result<String, String> {
     let mut output = String::from(
         "# Generated by DeepSeek Harness Desktop; removed when the app exits.\n- insert:\n",
     );
-    for (id, plugin) in plugins {
-        let url = Url::from_file_path(plugin)
-            .map_err(|_| format!("桌面集成插件路径不是有效的 file URL：{}", plugin.display()))?;
+    for plugin in plugins {
         // A single-quoted YAML scalar treats every character literally;
         // doubling a quote is the only escape it admits.
-        let plugin_url = url.as_str().replace('\'', "''");
-        output.push_str(&format!("    - id: {id}\n      name: '{plugin_url}'\n"));
+        let module_name = plugin.package_name.replace('\'', "''");
+        output.push_str(&format!(
+            "    - id: {}\n      name: '{module_name}'\n",
+            plugin.id
+        ));
     }
     Ok(output)
 }
 
-fn create_desktop_overlay(plugins: &[(&str, PathBuf)]) -> Result<PathBuf, String> {
+fn create_desktop_overlay(plugins: &[BundledPlugin]) -> Result<PathBuf, String> {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("读取系统时间失败：{error}"))?
@@ -485,9 +607,9 @@ fn suppress_console_window(command: &mut Command) {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::PathBuf;
 
-    use super::{desktop_overlay_content, parse_ready_url};
+    use super::{BundledPlugin, desktop_overlay_content, parse_ready_url};
 
     #[test]
     fn parses_loopback_readiness_line() {
@@ -502,25 +624,32 @@ mod tests {
     }
 
     #[test]
-    fn desktop_overlay_mounts_each_plugin_by_file_url() {
+    fn desktop_overlay_mounts_each_plugin_by_package_name() {
         let plugins = [
-            (
-                "desktop-bridge",
-                Path::new("C:/Desktop Plugin/bridge/index.mjs").to_path_buf(),
-            ),
-            (
-                "dsh-attachments",
-                Path::new("C:/Desktop Plugin/attachments/index.mjs").to_path_buf(),
-            ),
-            (
-                "dsh-model-capabilities",
-                Path::new("C:/Desktop Plugin/model-capabilities/index.mjs").to_path_buf(),
-            ),
+            BundledPlugin {
+                id: "desktop-bridge",
+                package_name: "@deepseek-ai/dsh-desktop-bridge",
+                package_root: PathBuf::from("bridge"),
+            },
+            BundledPlugin {
+                id: "dsh-attachments",
+                package_name: "dsh-attachments",
+                package_root: PathBuf::from("attachments"),
+            },
+            BundledPlugin {
+                id: "dsh-model-capabilities",
+                package_name: "dsh-model-capabilities",
+                package_root: PathBuf::from("model-capabilities"),
+            },
         ];
         let overlay = desktop_overlay_content(&plugins).expect("overlay");
-        assert!(overlay.contains("id: desktop-bridge"));
-        assert!(overlay.contains("id: dsh-attachments"));
-        assert!(overlay.contains("id: dsh-model-capabilities"));
-        assert!(overlay.contains("file:///C:/Desktop%20Plugin/bridge/index.mjs"));
+        assert!(
+            overlay.contains("id: desktop-bridge\n      name: '@deepseek-ai/dsh-desktop-bridge'")
+        );
+        assert!(overlay.contains("id: dsh-attachments\n      name: 'dsh-attachments'"));
+        assert!(
+            overlay.contains("id: dsh-model-capabilities\n      name: 'dsh-model-capabilities'")
+        );
+        assert!(!overlay.contains("file://"));
     }
 }
