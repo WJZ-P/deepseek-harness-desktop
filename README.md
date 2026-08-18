@@ -132,8 +132,8 @@ deepseek-harness-desktop/
 桌面专属桥与桌面预装的通用插件都没有继续散落进 `harness/` 业务包，而是通过启动时的 Cordis `--patch` 覆盖层装入。可复用插件各自拥有独立仓库、锁文件、CI 与发布边界；桌面仓库只记录来源和精确提交：
 
 - `desktop-bridge`：在 Host 返回 HTML 时注入深浅主题同步桥，并为显式 `file://` 开发挂载保留 `dsh.client` 兼容适配；桌面预装的标准插件会同时进入运行时的包解析面，并以各自 `package.json` 包名挂载，因此插件清单展示稳定名称、浏览器 bundle 使用 Harness 官方 `/plugins` 发现链路，公开插件无需携带 Tauri 分支；
-- [`dsh-attachments`](https://github.com/WJZ-P/dsh-attachments)：标准 DSH bundle，同时声明 `dsh.bundle` 与 Web `dsh.client`，既可由桌面封装携带，也可通过 `dsh plugin --profile web add` 安装到原生 DSH；它沿用 Harness 已有的图片拖放/粘贴链路，只接管普通文件与文件夹。拖入一个文件夹只生成一个附件卡片，并以完整目录树的形式复制到工作区；同时提供流式上传/下载、输入区附件卡片与持久历史卡片。插件本身不设置文件数量或单文件字节上限，也不额外占用输入栏按钮；
-- [`dsh-model-capabilities`](https://github.com/WJZ-P/dsh-model-capabilities)：标准 DSH bundle；在新增或编辑 pi-ai 模型时提供 Input Modalities 选择，可明确声明继承默认值、文本、图片或文本加图片，并可独立安装到原生 DSH；
+- [`dsh-attachment`](https://github.com/WJZ-P/dsh-attachments)：标准 DSH bundle，同时声明 `dsh.bundle` 与 Web `dsh.client`，既可由桌面封装携带，也可通过 `dsh plugin --profile web add dsh-attachment` 从 npm 安装到原生 DSH；它沿用 Harness 已有的图片拖放/粘贴链路，只接管普通文件与文件夹。拖入一个文件夹只生成一个附件卡片，并以完整目录树的形式复制到工作区；同时提供流式上传/下载、输入区附件卡片与持久历史卡片。插件本身不设置文件数量或单文件字节上限，也不额外占用输入栏按钮；
+- [`dsh-model-capability`](https://github.com/WJZ-P/dsh-model-capabilities)：标准 DSH bundle；在新增或编辑 pi-ai 模型时提供 Input Modalities 选择，可明确声明继承默认值、文本、图片或文本加图片，并可通过 `dsh plugin --profile web add dsh-model-capability` 从 npm 独立安装到原生 DSH；
 - 普通文件会保存到 Harness 数据目录，并在消息真正进入模型步骤前复制到工作区 `.deepseek-harness/attachments/`，模型拿到的是可直接读取的工作区路径；
 - `harness/` 内只保留通用的 **输入附件栏 slot** 与 **模型行字段 slot**；浏览器 bundle 直接使用 Harness 官方 `dsh.client` 发现链路，具体 UI、存储和消息关联逻辑留在独立插件仓库与 `desktop-plugins/`。以后同步上游时，冲突面依旧很小喵～
 

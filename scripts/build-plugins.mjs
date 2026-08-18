@@ -17,6 +17,7 @@ async function buildDesktopBridge() {
 async function assertStandardBundle(root, directory) {
   const manifestPath = join(root, 'package.json')
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+  const patch = await readFile(join(root, 'cordis.patch.yml'), 'utf8')
   const requiredFiles = [
     'README.md',
     'LICENSE',
@@ -24,8 +25,12 @@ async function assertStandardBundle(root, directory) {
     join('scripts', 'build.mjs'),
   ]
 
-  if (manifest.name !== directory) {
-    throw new Error(`${directory}: package name must match its plugins/ directory`)
+  if (!/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(manifest.name)) {
+    throw new Error(`${directory}: package name is not a valid npm package specifier`)
+  }
+  const escapedPackageName = manifest.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  if (!new RegExp(`^\\s+name:\\s*['"]?${escapedPackageName}['"]?\\s*$`, 'm').test(patch)) {
+    throw new Error(`${directory}: cordis.patch.yml must mount package ${manifest.name}`)
   }
   if (manifest.private === true) {
     throw new Error(`${directory}: reusable DSH bundles must be publishable, not private`)

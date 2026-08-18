@@ -386,13 +386,13 @@ fn checked_plugins(
             desktop_root.join("desktop-bridge"),
         ),
         (
-            "dsh-attachments",
-            "dsh-attachments",
+            "dsh-attachment",
+            "dsh-attachment",
             shared_root.join("dsh-attachments"),
         ),
         (
-            "dsh-model-capabilities",
-            "dsh-model-capabilities",
+            "dsh-model-capability",
+            "dsh-model-capability",
             shared_root.join("dsh-model-capabilities"),
         ),
     ]
@@ -632,13 +632,13 @@ mod tests {
                 package_root: PathBuf::from("bridge"),
             },
             BundledPlugin {
-                id: "dsh-attachments",
-                package_name: "dsh-attachments",
+                id: "dsh-attachment",
+                package_name: "dsh-attachment",
                 package_root: PathBuf::from("attachments"),
             },
             BundledPlugin {
-                id: "dsh-model-capabilities",
-                package_name: "dsh-model-capabilities",
+                id: "dsh-model-capability",
+                package_name: "dsh-model-capability",
                 package_root: PathBuf::from("model-capabilities"),
             },
         ];
@@ -646,10 +646,8 @@ mod tests {
         assert!(
             overlay.contains("id: desktop-bridge\n      name: '@deepseek-ai/dsh-desktop-bridge'")
         );
-        assert!(overlay.contains("id: dsh-attachments\n      name: 'dsh-attachments'"));
-        assert!(
-            overlay.contains("id: dsh-model-capabilities\n      name: 'dsh-model-capabilities'")
-        );
+        assert!(overlay.contains("id: dsh-attachment\n      name: 'dsh-attachment'"));
+        assert!(overlay.contains("id: dsh-model-capability\n      name: 'dsh-model-capability'"));
         assert!(!overlay.contains("file://"));
     }
 }

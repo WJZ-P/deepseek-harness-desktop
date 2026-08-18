@@ -29,14 +29,14 @@ const bundledPlugins = [
     directory: "desktop-bridge",
   },
   {
-    id: "dsh-attachments",
-    packageName: "dsh-attachments",
+    id: "dsh-attachment",
+    packageName: "dsh-attachment",
     root: "plugins",
     directory: "dsh-attachments",
   },
   {
-    id: "dsh-model-capabilities",
-    packageName: "dsh-model-capabilities",
+    id: "dsh-model-capability",
+    packageName: "dsh-model-capability",
     root: "plugins",
     directory: "dsh-model-capabilities",
   },
@@ -497,26 +497,26 @@ async function smokeRuntime() {
         if (!body.includes("data-dsh-desktop-theme-bridge")) {
           throw new Error("Harness smoke response is missing the desktop theme bridge.");
         }
-        if (!body.includes("dsh-attachments")) {
+        if (!body.includes("dsh-attachment")) {
           throw new Error("Harness smoke manifest is missing the desktop attachments bundle.");
         }
-        if (!body.includes("dsh-model-capabilities")) {
+        if (!body.includes("dsh-model-capability")) {
           throw new Error("Harness smoke manifest is missing the model capabilities bundle.");
         }
         const clientResponse = await fetch(
-          `${ready[1]}/plugins/dsh-attachments/client.js`,
+          `${ready[1]}/plugins/dsh-attachment/client.js`,
         );
         const clientBody = await clientResponse.text();
         if (clientResponse.status !== 200
-          || !clientBody.includes("dsh-attachments")) {
+          || !clientBody.includes("dsh-attachment")) {
           throw new Error(`Desktop attachments bundle returned HTTP ${clientResponse.status}.`);
         }
         const capabilitiesResponse = await fetch(
-          `${ready[1]}/plugins/dsh-model-capabilities/client.js`,
+          `${ready[1]}/plugins/dsh-model-capability/client.js`,
         );
         const capabilitiesBody = await capabilitiesResponse.text();
         if (capabilitiesResponse.status !== 200
-          || !capabilitiesBody.includes("dsh-model-capabilities")) {
+          || !capabilitiesBody.includes("dsh-model-capability")) {
           throw new Error(`Model capabilities bundle returned HTTP ${capabilitiesResponse.status}.`);
         }
         await finish(undefined, { url: ready[1], bytes: body.length });

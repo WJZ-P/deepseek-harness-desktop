@@ -36,15 +36,15 @@ test('file-mounted standard packages contribute their declared browser metadata'
   ])
 
   assert.deepEqual(bundles.map(bundle => bundle.entry.id), [
-    'dsh-attachments',
-    'dsh-model-capabilities',
+    'dsh-attachment',
+    'dsh-model-capability',
   ])
   assert.deepEqual(bundles[0].entry.inject, [
     '@deepseek-ai/dsh-client-runtime',
     '@deepseek-ai/dsh-client-ui-conversation',
   ])
   assert.equal(bundles[0].entry.immediately, true)
-  assert.match(bundles[0].entry.url, /^\/desktop-plugin-bundles\/dsh-attachments\/client\.js\?rev=[a-f0-9]{12}$/)
+  assert.match(bundles[0].entry.url, /^\/desktop-plugin-bundles\/dsh-attachment\/client\.js\?rev=[a-f0-9]{12}$/)
   assert.ok(bundles[0].body.byteLength > 0)
 })
 
@@ -56,7 +56,7 @@ test('Desktop bundles merge into the standard boot graph once', () => {
   const first = injectDesktopClientBundles(source, bundles)
 
   assert.match(first, new RegExp(`<script ${CLIENT_BUNDLES_MARKER}>\\(\\(\\) =>`))
-  assert.match(first, /"id":"dsh-attachments"/)
+  assert.match(first, /"id":"dsh-attachment"/)
   assert.ok(first.indexOf('window.__DSH_BOOT__ = ') < first.indexOf(CLIENT_BUNDLES_MARKER))
   assert.ok(first.indexOf(CLIENT_BUNDLES_MARKER) < first.indexOf('</head>'))
 
@@ -65,7 +65,7 @@ test('Desktop bundles merge into the standard boot graph once', () => {
   vm.runInNewContext(script, { window, Set, Error })
   assert.deepEqual(
     window.__DSH_BOOT__.entries.map(row => row.id),
-    ['core', 'dsh-attachments'],
+    ['core', 'dsh-attachment'],
   )
   assert.match(window.__DSH_BOOT__.rev, /^base-desktop-[a-f0-9]{12}$/)
   assert.equal(injectDesktopClientBundles(first, bundles), first)
@@ -114,14 +114,14 @@ test('apply discovers file-mounted bundles that activate after the bridge', () =
 
   const source = '<html><head><script>window.__DSH_BOOT__ = {"rev":"base","entries":[]}</script></head><body></body></html>'
   const transformed = taps.reduce((html, tap) => tap(html), source)
-  assert.match(transformed, /"id":"dsh-attachments"/)
-  assert.match(transformed, /"id":"dsh-model-capabilities"/)
+  assert.match(transformed, /"id":"dsh-attachment"/)
+  assert.match(transformed, /"id":"dsh-model-capability"/)
 
   let status
   let headers
   let responseBody
   routes[0].handler(
-    { method: 'GET', url: '/desktop-plugin-bundles/dsh-model-capabilities/client.js?rev=test' },
+    { method: 'GET', url: '/desktop-plugin-bundles/dsh-model-capability/client.js?rev=test' },
     {
       writeHead: (nextStatus, nextHeaders) => {
         status = nextStatus
@@ -132,7 +132,7 @@ test('apply discovers file-mounted bundles that activate after the bridge', () =
   )
   assert.equal(status, 200)
   assert.equal(headers['content-type'], 'text/javascript; charset=utf-8')
-  assert.match(responseBody.toString('utf8'), /dsh-model-capabilities/)
+  assert.match(responseBody.toString('utf8'), /dsh-model-capability/)
 
   routes[0].handler(
     { method: 'GET', url: '/desktop-plugin-bundles/missing/client.js' },
