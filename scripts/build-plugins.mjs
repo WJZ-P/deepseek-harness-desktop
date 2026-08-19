@@ -101,6 +101,9 @@ async function stageResolverPackage(root) {
   await rm(destination, { recursive: true, force: true })
   await mkdir(join(destination, 'lib'), { recursive: true })
   await copyFile(join(root, 'package.json'), join(destination, 'package.json'))
+  if (manifest.dsh?.bundle?.patch === './cordis.patch.yml') {
+    await copyFile(join(root, 'cordis.patch.yml'), join(destination, 'cordis.patch.yml'))
+  }
   await cp(join(root, 'lib'), join(destination, 'lib'), {
     recursive: true,
     dereference: true,
